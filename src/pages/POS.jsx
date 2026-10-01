@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search, Plus, Minus, Trash2, ScanLine, ShoppingCart, UserPlus, X,
-  Banknote, QrCode, CreditCard, Landmark, Printer, CheckCircle2, Coins,
+  Banknote, QrCode, CreditCard, Landmark, Printer, CheckCircle2, Coins, PackagePlus,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -41,6 +41,8 @@ const POS = () => {
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [categories, setCategories] = useState([]);
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [tab, setTab] = useState('produk');
+  const [bundles, setBundles] = useState([]);
   const barcodeRef = useRef(null);
   const searchRef = useRef(null);
 
@@ -80,12 +82,16 @@ const POS = () => {
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true);
     try {
-      const result = await api.get('/api/products', {
-        search: debouncedSearch,
-        category_id: categoryFilter,
-        limit: 40,
-      });
+      const [result, bundleResult] = await Promise.all([
+        api.get('/api/products', {
+          search: debouncedSearch,
+          category_id: categoryFilter,
+          limit: 40,
+        }),
+        api.get('/api/bundles', { is_active: true, limit: 100 }).catch(() => ({ data: [] })),
+      ]);
       setProducts(result.data);
+      setBundles(bundleResult.data || []);
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -101,9 +107,12 @@ const POS = () => {
   const quoteKey = JSON.stringify(cart.items.map((i) => [i.product_id, i.unit_id, i.qty]));
   useEffect(() => {
     if (cart.items.length === 0) return undefined;
+    // Paket tidak di-quote (harga tetap); cukup produk biasa.
+    const productItems = cart.items.filter((i) => !i.bundle_id);
+    if (productItems.length === 0) return undefined;
     let active = true;
     const timer = setTimeout(() => {
-      const items = cart.items.map((i) => ({
+      const items = productItems.map((i) => ({
         product_id: i.product_id,
         unit_id: i.unit_id,
         qty: i.qty,
@@ -141,6 +150,15 @@ const POS = () => {
     [cart, focusBarcode]
   );
 
+  const addBundleToCart = useCallback(
+    (bundle) => {
+      cart.addBundle(bundle, 1);
+      toast.success(`${bundle.name} ditambahkan`);
+      focusBarcode();
+    },
+    [cart, focusBarcode, toast]
+  );
+
   const handleBarcode = async (event) => {
     if (event.key !== 'Enter') return;
     const code = barcode.trim();
@@ -155,7 +173,13 @@ const POS = () => {
       }
       toast.success(`${result.product.name} ditambahkan`);
     } catch (err) {
-      toast.error(err.message);
+      // Bukan produk: coba sebagai barcode paket.
+      try {
+        const bundleResult = await api.get(`/api/bundles/barcode/${encodeURIComponent(code)}`);
+        addBundleToCart(bundleResult.bundle);
+      } catch {
+        toast.error(err.message);
+      }
     }
   };
 
@@ -209,12 +233,16 @@ const POS = () => {
       const payload = {
         shift_id: shift.id,
         member_id: cart.member?.id || null,
-        items: cart.items.map((item) => ({
-          product_id: item.product_id,
-          unit_id: item.unit_id,
-          qty: item.qty,
-          discount: item.discount,
-        })),
+        items: cart.items.map((item) => (
+          item.bundle_id
+            ? { bundle_id: item.bundle_id, qty: item.qty, discount: item.discount }
+            : {
+              product_id: item.product_id,
+              unit_id: item.unit_id,
+              qty: item.qty,
+              discount: item.discount,
+            }
+        )),
         txn_discount: cart.txnDiscount,
         redeem_points: cart.redeemPoints,
         payments: payments
@@ -318,6 +346,22 @@ const POS = () => {
 
             <div className="flex gap-2 overflow-x-auto pb-1">
               <button
+                onClick={() => setTab('produk')}
+                className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors ${tab === 'produk' ? 'bg-ios-blue text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
+              >
+                Produk
+              </button>
+              <button
+                onClick={() => setTab('paket')}
+                className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors flex items-center gap-1 ${tab === 'paket' ? 'bg-ios-purple text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
+              >
+                <PackagePlus size={12} /> Paket
+              </button>
+            </div>
+
+            {tab === 'produk' && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              <button
                 onClick={() => setCategoryFilter('')}
                 className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors ${!categoryFilter ? 'bg-ios-blue text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
               >
@@ -333,12 +377,34 @@ const POS = () => {
                 </button>
               ))}
             </div>
+            )}
           </div>
         </Card>
 
         <div className="flex-1 min-h-0 overflow-y-auto">
           {loadingProducts ? (
             <div className="text-center py-10 text-slate-400">Memuat produk...</div>
+          ) : tab === 'paket' ? (
+            bundles.length === 0 ? (
+              <div className="text-center py-10 text-slate-500">Belum ada paket aktif</div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-3">
+                {bundles.map((bundle) => (
+                  <button
+                    key={bundle.id}
+                    onClick={() => addBundleToCart(bundle)}
+                    className="text-left bg-slate-900/65 backdrop-blur-glass border border-ios-purple/30 rounded-ios-sm p-3 hover:border-ios-purple/60 hover:bg-slate-900 transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm text-white font-medium line-clamp-2">{bundle.name}</span>
+                      <Badge tone="purple">PAKET</Badge>
+                    </div>
+                    <div className="mt-2 text-ios-green font-semibold text-sm">{formatCurrency(bundle.price)}</div>
+                    <div className="text-xs text-slate-500 font-mono">{bundle.sku}</div>
+                  </button>
+                ))}
+              </div>
+            )
           ) : products.length === 0 ? (
             <div className="text-center py-10 text-slate-500">Produk tidak ditemukan</div>
           ) : (
@@ -414,14 +480,17 @@ const POS = () => {
               </div>
             ) : (
               cart.items.map((item) => {
-                const key = `${item.product_id}:${item.unit_id || 'base'}`;
+                const key = cart.keyOf(item);
                 return (
                   <div key={key} className="bg-white/5 rounded-ios-sm p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm text-white truncate">{item.name}</div>
+                        <div className="text-sm text-white truncate flex items-center gap-2">
+                          {item.name}
+                          {item.bundle_id && <Badge tone="purple">PAKET</Badge>}
+                        </div>
                         <div className="text-xs text-slate-500">
-                          {formatCurrency(item.price)} / {item.unit_name}
+                          {formatCurrency(item.price)} / {item.bundle_id ? 'paket' : item.unit_name}
                         </div>
                         {item.promo_name && (
                           <div className="mt-1 flex items-center gap-1">
@@ -434,7 +503,7 @@ const POS = () => {
                         )}
                       </div>
                       <button
-                        onClick={() => cart.removeItem(item.product_id, item.unit_id)}
+                        onClick={() => cart.removeItemByKey(key)}
                         className="p-1 hover:bg-white/10 rounded text-ios-red"
                       >
                         <Trash2 size={14} />
@@ -443,7 +512,7 @@ const POS = () => {
                     <div className="flex items-center justify-between mt-2">
                       <div className="flex items-center gap-1">
                         <button
-                          onClick={() => cart.updateQty(item.product_id, item.unit_id, item.qty - 1)}
+                          onClick={() => cart.updateQtyByKey(key, item.qty - 1)}
                           className="w-7 h-7 flex items-center justify-center rounded bg-white/10 hover:bg-white/20 text-white"
                         >
                           <Minus size={14} />
@@ -452,10 +521,10 @@ const POS = () => {
                           type="number"
                           className="w-12 text-center bg-slate-950/60 border border-white/10 rounded py-1 text-sm text-white"
                           value={item.qty}
-                          onChange={(e) => cart.updateQty(item.product_id, item.unit_id, parseQty(e.target.value))}
+                          onChange={(e) => cart.updateQtyByKey(key, parseQty(e.target.value))}
                         />
                         <button
-                          onClick={() => cart.updateQty(item.product_id, item.unit_id, item.qty + 1)}
+                          onClick={() => cart.updateQtyByKey(key, item.qty + 1)}
                           className="w-7 h-7 flex items-center justify-center rounded bg-white/10 hover:bg-white/20 text-white"
                         >
                           <Plus size={14} />
@@ -477,7 +546,7 @@ const POS = () => {
                         className="w-24 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-white text-right"
                         value={item.discount || ''}
                         placeholder="0"
-                        onChange={(e) => cart.updateDiscount(item.product_id, item.unit_id, parseMoney(e.target.value))}
+                        onChange={(e) => cart.updateDiscountByKey(key, parseMoney(e.target.value))}
                       />
                     </div>
                   </div>

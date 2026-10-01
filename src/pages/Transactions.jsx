@@ -245,8 +245,11 @@ const Transactions = () => {
             >
               {detail.items.map((item) => (
                 <tr key={item.id}>
-                  <td className="px-4 py-2 text-white">{item.product_name}</td>
-                  <td className="px-4 py-2 text-right text-slate-300">{item.qty} {item.unit_name || item.base_unit}</td>
+                  <td className="px-4 py-2 text-white">
+                    {item.display_name || item.product_name || item.bundle_name || '-'}
+                    {item.bundle_id ? ' (PAKET)' : ''}
+                  </td>
+                  <td className="px-4 py-2 text-right text-slate-300">{item.qty} {item.unit_name || item.base_unit || ''}</td>
                   <td className="px-4 py-2 text-right text-slate-400">{formatCurrency(item.unit_price)}</td>
                   <td className="px-4 py-2 text-right text-ios-orange">{item.discount > 0 ? `-${formatCurrency(item.discount)}` : '-'}</td>
                   <td className="px-4 py-2 text-right text-slate-400">{item.returned_qty || '-'}</td>
@@ -348,7 +351,10 @@ const Transactions = () => {
             const remaining = item.qty - (item.returned_qty || 0);
             return (
               <tr key={item.id}>
-                <td className="px-4 py-2 text-white">{item.product_name}</td>
+                <td className="px-4 py-2 text-white">
+                  {item.display_name || item.product_name || item.bundle_name || '-'}
+                  {item.bundle_id ? ' (PAKET)' : ''}
+                </td>
                 <td className="px-4 py-2 text-right text-slate-300">{item.qty}</td>
                 <td className="px-4 py-2 text-right text-slate-400">{item.returned_qty || 0}</td>
                 <td className="px-4 py-2 text-right">

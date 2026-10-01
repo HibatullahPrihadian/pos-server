@@ -78,6 +78,11 @@ const validateProductBody = (body, { partial = false } = {}) => {
     const sid = toInt(body.supplier_id, 0);
     value.supplier_id = sid > 0 ? sid : null;
   }
+  if ('is_consignment' in body) value.is_consignment = toBool(body.is_consignment, false);
+  if ('consignor_id' in body) {
+    const cid = toInt(body.consignor_id, 0);
+    value.consignor_id = cid > 0 ? cid : null;
+  }
   if ('is_active' in body) value.is_active = toBool(body.is_active, true);
 
   return { value };
@@ -287,13 +292,14 @@ router.post('/', requireRole('admin'), async (req, res, next) => {
 
     const result = await pool.query(
       `INSERT INTO products
-        (sku, barcode, name, category_id, supplier_id, base_unit, cost_price, sell_price, member_price, min_stock)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        (sku, barcode, name, category_id, supplier_id, base_unit, cost_price, sell_price, member_price, min_stock, is_consignment, consignor_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [
         value.sku, value.barcode || null, value.name, value.category_id || null,
         value.supplier_id || null, value.base_unit, value.cost_price ?? 0, value.sell_price,
-        value.member_price ?? null, value.min_stock ?? 0,
+        value.member_price ?? null, value.min_stock ?? 0, value.is_consignment ?? false,
+        value.consignor_id || null,
       ]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'products', entityId: result.rows[0].id });

@@ -13,7 +13,7 @@ import Pagination from '../components/ui/Pagination';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import useDebounce from '../hooks/useDebounce';
 
-const EMPTY = { sku: '', barcode: '', name: '', category_id: '', supplier_id: '', base_unit: 'pcs', cost_price: '', sell_price: '', member_price: '', min_stock: '', is_active: true };
+const EMPTY = { sku: '', barcode: '', name: '', category_id: '', supplier_id: '', base_unit: 'pcs', cost_price: '', sell_price: '', member_price: '', min_stock: '', is_active: true, is_consignment: false, consignor_id: '' };
 
 const Products = () => {
   const toast = useToastContext();
@@ -24,6 +24,7 @@ const Products = () => {
   const [categoryFilter, setCategoryFilter] = useState('');
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
+  const [consignors, setConsignors] = useState([]);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -75,6 +76,9 @@ const Products = () => {
   useEffect(() => {
     api.get('/api/categories').then(setCategories).catch(() => {});
     api.get('/api/suppliers').then(setSuppliers).catch(() => {});
+    api.get('/api/consignment/consignors', { limit: 200 })
+      .then((r) => setConsignors(r.data || []))
+      .catch(() => {});
   }, []);
 
   const openCreate = () => {
@@ -97,6 +101,8 @@ const Products = () => {
       member_price: product.member_price ?? '',
       min_stock: product.min_stock,
       is_active: product.is_active,
+      is_consignment: Boolean(product.is_consignment),
+      consignor_id: product.consignor_id || '',
     });
     setModalOpen(true);
   };
@@ -110,6 +116,7 @@ const Products = () => {
         supplier_id: form.supplier_id || null,
         member_price: form.member_price === '' ? null : form.member_price,
         barcode: form.barcode || null,
+        consignor_id: form.is_consignment ? (form.consignor_id || null) : null,
       };
       if (editing) {
         await api.put(`/api/products/${editing.id}`, payload);
@@ -314,7 +321,10 @@ const Products = () => {
                       <div className="w-9 h-9 rounded bg-white/5 border border-white/10" />
                     )}
                     <div>
-                      <div className="text-white">{product.name}</div>
+                      <div className="text-white flex items-center gap-2">
+                        {product.name}
+                        {product.is_consignment && <Badge tone="purple">Titipan</Badge>}
+                      </div>
                       {product.barcode && <div className="text-xs text-slate-500">{product.barcode}</div>}
                     </div>
                   </div>
@@ -382,8 +392,18 @@ const Products = () => {
             <option value="1">Aktif</option>
             <option value="0">Nonaktif</option>
           </Input>
+          <Input as="select" label="Barang Titipan (Konsinyasi)" value={form.is_consignment ? '1' : '0'} onChange={(e) => setForm({ ...form, is_consignment: e.target.value === '1', consignor_id: e.target.value === '1' ? form.consignor_id : '' })}>
+            <option value="0">Bukan Konsinyasi</option>
+            <option value="1">Konsinyasi</option>
+          </Input>
+          {form.is_consignment && (
+            <Input as="select" label="Penitip" value={form.consignor_id} onChange={(e) => setForm({ ...form, consignor_id: e.target.value })}>
+              <option value="">- Pilih Penitip -</option>
+              {consignors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </Input>
+          )}
         </div>
-        <p className="mt-3 text-xs text-slate-500">Semua harga dalam rupiah dan sudah termasuk PPN.</p>
+        <p className="mt-3 text-xs text-slate-500">Semua harga dalam rupiah dan sudah termasuk PPN. Harga Beli (HPP) produk konsinyasi dipakai sebagai harga setor ke penitip.</p>
       </Modal>
 
       <Modal isOpen={Boolean(unitsProduct)} onClose={() => setUnitsProduct(null)} title={`Satuan - ${unitsProduct?.name || ''}`}>

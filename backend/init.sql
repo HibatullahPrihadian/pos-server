@@ -364,6 +364,107 @@ CREATE TABLE IF NOT EXISTS return_items (
 );
 
 -- =========================================================
+-- P2: Bundling (paket produk)
+-- =========================================================
+-- Paket dijual dengan harga tetap yang ditetapkan admin. Komponen paket
+-- mengurangi stok masing-masing produk saat checkout. Tidak masuk tier/promo
+-- item; promo level transaksi tetap berlaku karena dihitung dari subtotal.
+CREATE TABLE IF NOT EXISTS bundles (
+    id SERIAL PRIMARY KEY,
+    sku VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(200) NOT NULL,
+    barcode VARCHAR(50) UNIQUE,
+    price BIGINT NOT NULL CHECK (price >= 0),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS bundle_items (
+    id SERIAL PRIMARY KEY,
+    bundle_id INTEGER NOT NULL REFERENCES bundles(id) ON DELETE CASCADE,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    qty INTEGER NOT NULL CHECK (qty > 0),
+    UNIQUE (bundle_id, product_id)
+);
+
+-- Baris paket disimpan di sale_items dengan bundle_id terisi & product_id NULL.
+-- Relaksasi product_id + CHECK: baris harus berupa produk ATAU paket (A2-i).
+ALTER TABLE sale_items ALTER COLUMN product_id DROP NOT NULL;
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS bundle_id INTEGER REFERENCES bundles(id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'sale_items_product_or_bundle'
+    ) THEN
+        ALTER TABLE sale_items
+            ADD CONSTRAINT sale_items_product_or_bundle
+            CHECK (product_id IS NOT NULL OR bundle_id IS NOT NULL);
+    END IF;
+END $$;
+
+-- return_items mengikuti aturan yang sama: baris retur paket menyimpan bundle_id
+-- tanpa product_id (refund dicatat satu baris, stok dikembalikan per komponen).
+ALTER TABLE return_items ALTER COLUMN product_id DROP NOT NULL;
+ALTER TABLE return_items ADD COLUMN IF NOT EXISTS bundle_id INTEGER REFERENCES bundles(id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'return_items_product_or_bundle'
+    ) THEN
+        ALTER TABLE return_items
+            ADD CONSTRAINT return_items_product_or_bundle
+            CHECK (product_id IS NOT NULL OR bundle_id IS NOT NULL);
+    END IF;
+END $$;
+
+-- =========================================================
+-- P2: Konsinyasi (barang titipan)
+-- =========================================================
+CREATE TABLE IF NOT EXISTS consignors (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    phone VARCHAR(50),
+    address TEXT,
+    note TEXT,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS is_consignment BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS consignor_id INTEGER REFERENCES consignors(id);
+
+-- Pembayaran ke penitip. Hutang berjalan = SUM(harga setor barang konsinyasi
+-- terjual) - SUM(payouts.amount). Tidak memakai ledger penuh (pola purchase payment).
+CREATE TABLE IF NOT EXISTS consignment_payouts (
+    id SERIAL PRIMARY KEY,
+    consignor_id INTEGER NOT NULL REFERENCES consignors(id),
+    amount BIGINT NOT NULL CHECK (amount > 0),
+    period_from DATE,
+    period_to DATE,
+    note TEXT,
+    user_id INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- =========================================================
+-- P2: Absensi karyawan
+-- =========================================================
+CREATE TABLE IF NOT EXISTS attendance (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    work_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    check_in TIMESTAMPTZ,
+    check_out TIMESTAMPTZ,
+    shift_id INTEGER REFERENCES shifts(id),
+    note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (user_id, work_date)
+);
+
+-- =========================================================
 -- Indeks
 -- =========================================================
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products (barcode);
@@ -388,3 +489,12 @@ CREATE INDEX IF NOT EXISTS idx_price_tiers_lookup ON price_tiers (product_id, un
 CREATE INDEX IF NOT EXISTS idx_promotions_active ON promotions (is_active);
 CREATE INDEX IF NOT EXISTS idx_promotions_product ON promotions (is_active, product_id, min_qty);
 CREATE INDEX IF NOT EXISTS idx_promotions_category ON promotions (is_active, category_id, min_qty);
+-- P2: bundling
+CREATE INDEX IF NOT EXISTS idx_bundle_items_bundle ON bundle_items (bundle_id);
+CREATE INDEX IF NOT EXISTS idx_bundles_barcode ON bundles (barcode);
+CREATE INDEX IF NOT EXISTS idx_sale_items_bundle ON sale_items (bundle_id);
+-- P2: konsinyasi
+CREATE INDEX IF NOT EXISTS idx_products_consignor ON products (consignor_id);
+CREATE INDEX IF NOT EXISTS idx_consignment_payouts_consignor ON consignment_payouts (consignor_id, created_at);
+-- P2: absensi
+CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON attendance (user_id, work_date);

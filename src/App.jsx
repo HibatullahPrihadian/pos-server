@@ -12,6 +12,9 @@ import POS from './pages/POS';
 import Transactions from './pages/Transactions';
 import Products from './pages/Products';
 import Promotions from './pages/Promotions';
+import Bundles from './pages/Bundles';
+import Consignment from './pages/Consignment';
+import Attendance from './pages/Attendance';
 import Categories from './pages/Categories';
 import Suppliers from './pages/Suppliers';
 import Stock from './pages/Stock';
@@ -48,6 +51,8 @@ function App() {
 
                 <Route path="/products" element={<Page adminOnly><Products /></Page>} />
                 <Route path="/promotions" element={<Page adminOnly><Promotions /></Page>} />
+                <Route path="/bundles" element={<Page adminOnly><Bundles /></Page>} />
+                <Route path="/consignment" element={<Page adminOnly><Consignment /></Page>} />
                 <Route path="/categories" element={<Page adminOnly><Categories /></Page>} />
                 <Route path="/suppliers" element={<Page adminOnly><Suppliers /></Page>} />
                 <Route path="/stock" element={<Page adminOnly><Stock /></Page>} />
@@ -56,6 +61,8 @@ function App() {
 
                 <Route path="/members" element={<Page><Members /></Page>} />
                 <Route path="/reports" element={<Page adminOnly><Reports /></Page>} />
+
+                <Route path="/attendance" element={<Page><Attendance /></Page>} />
 
                 <Route path="/users" element={<Page adminOnly><Users /></Page>} />
                 <Route path="/settings" element={<Page adminOnly><Settings /></Page>} />

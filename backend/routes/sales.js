@@ -85,20 +85,28 @@ router.post('/', async (req, res, next) => {
       let subtotal = 0;
       let itemDiscountTotal = 0;
 
-      // Validasi awal + kunci baris produk (FOR UPDATE) satu kali per item,
-      // mempertahankan pola lama untuk konsistensi stok.
-      const normalizedItems = body.items.map((raw) => {
-        const productId = toInt(raw?.product_id, 0);
-        if (productId <= 0) throw new HttpError(400, 'product_id tidak valid');
+      // Pisahkan baris produk biasa dan baris paket (bundle). Baris paket ditandai
+      // dengan `bundle_id` sebagai ganti `product_id`.
+      const normalizedProductItems = [];
+      const normalizedBundleItems = [];
+      for (const raw of body.items) {
+        const bundleId = toInt(raw?.bundle_id, 0);
         const qty = Math.round(Number(raw?.qty));
         if (!Number.isFinite(qty) || qty <= 0) throw new HttpError(400, 'qty harus bilangan bulat positif');
         if (qty > MAX_LINE_QTY) throw new HttpError(400, `qty melebihi batas ${MAX_LINE_QTY}`);
+
+        if (bundleId > 0) {
+          normalizedBundleItems.push({ raw, bundleId, qty });
+          continue;
+        }
+        const productId = toInt(raw?.product_id, 0);
+        if (productId <= 0) throw new HttpError(400, 'product_id tidak valid');
         const unitId = toInt(raw?.unit_id, 0) || null;
-        return { raw, productId, qty, unitId };
-      });
+        normalizedProductItems.push({ raw, productId, qty, unitId, index: normalizedProductItems.length });
+      }
 
       const lockedProducts = new Map();
-      for (const item of normalizedItems) {
+      for (const item of normalizedProductItems) {
         if (lockedProducts.has(item.productId)) continue;
         const productResult = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [item.productId]);
         const product = productResult.rows[0];
@@ -108,13 +116,69 @@ router.post('/', async (req, res, next) => {
       }
 
       // Resolusi harga efektif (normal/member/tier/promo) dalam query tetap, bukan N+1.
+      // Paket tidak lewat resolver ini; harganya tetap dari bundles.price.
       const priced = await resolveItemsEffectivePricing(client, {
-        items: normalizedItems.map((i) => ({ product_id: i.productId, unit_id: i.unitId, qty: i.qty })),
+        items: normalizedProductItems.map((i) => ({ product_id: i.productId, unit_id: i.unitId, qty: i.qty })),
         isMember,
       });
 
-      for (let idx = 0; idx < normalizedItems.length; idx += 1) {
-        const { raw, productId, qty, unitId } = normalizedItems[idx];
+      const allowNegativeStock = settings.allow_negative_stock === true;
+
+      // Baris paket: ambil komponen, hitung HPP total, dan siapkan mutasi stok per komponen.
+      const bundleLines = [];
+      for (const item of normalizedBundleItems) {
+        const bundleResult = await client.query('SELECT * FROM bundles WHERE id = $1', [item.bundleId]);
+        const bundle = bundleResult.rows[0];
+        if (!bundle) throw new HttpError(404, `Paket #${item.bundleId} tidak ditemukan`);
+        if (!bundle.is_active) throw new HttpError(400, `Paket ${bundle.name} tidak aktif`);
+
+        const componentsResult = await client.query(
+          `SELECT bi.product_id, bi.qty, p.name, p.cost_price
+           FROM bundle_items bi
+           JOIN products p ON p.id = bi.product_id
+           WHERE bi.bundle_id = $1
+           ORDER BY bi.id`,
+          [bundle.id]
+        );
+        if (componentsResult.rows.length === 0) {
+          throw new HttpError(400, `Paket ${bundle.name} belum memiliki komponen`);
+        }
+
+        const unitPrice = Number(bundle.price);
+        const grossLine = unitPrice * item.qty;
+        const lineDiscount = Math.max(0, Math.round(Number(item.raw?.discount) || 0));
+        if (lineDiscount > grossLine) {
+          throw new HttpError(400, `Diskon paket ${bundle.name} melebihi harga`);
+        }
+
+        // HPP per satuan paket = SUM(HPP komponen * qty komponen dalam satuan dasar).
+        const unitCost = componentsResult.rows.reduce(
+          (sum, c) => sum + Number(c.cost_price) * c.qty,
+          0
+        );
+
+        subtotal += grossLine;
+        itemDiscountTotal += lineDiscount;
+
+        bundleLines.push({
+          bundle,
+          qty: item.qty,
+          unitPrice,
+          lineDiscount,
+          lineTotal: grossLine - lineDiscount,
+          // costPrice per satuan jual paket (laporan laba kotor memakai cost_price * qty).
+          costPrice: Math.round(unitCost),
+          components: componentsResult.rows.map((c) => ({
+            productId: c.product_id,
+            qtyPerBundle: c.qty,
+            name: c.name,
+            baseCostPrice: Number(c.cost_price),
+          })),
+        });
+      }
+
+      for (let idx = 0; idx < normalizedProductItems.length; idx += 1) {
+        const { raw, productId, qty, unitId } = normalizedProductItems[idx];
         const priced_line = priced[idx];
         const product = lockedProducts.get(productId);
         if (!priced_line || priced_line.unitMissing) {
@@ -135,6 +199,7 @@ router.post('/', async (req, res, next) => {
         itemDiscountTotal += lineDiscount;
 
         lines.push({
+          kind: 'product',
           product,
           unitId,
           unitName: priced_line.unitName,
@@ -246,8 +311,46 @@ router.post('/', async (req, res, next) => {
           unitCost: line.baseCostPrice,
           note: invoiceNo,
           userId: req.user.id,
-          allowNegative: settings.allow_negative_stock === true,
+          allowNegative: allowNegativeStock,
         });
+      }
+
+      // Simpan baris paket (product_id NULL, bundle_id terisi) dan kurangi stok
+      // tiap komponen. Paket tidak masuk tier/promo item (harga tetap admin).
+      for (const line of bundleLines) {
+        await client.query(
+          `INSERT INTO sale_items
+            (sale_id, product_id, bundle_id, unit_name, qty, base_qty, unit_price, discount, cost_price, line_total)
+           VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [
+            sale.id, line.bundle.id, line.bundle.sku || 'PAKET', line.qty, line.qty,
+            line.unitPrice, line.lineDiscount, line.costPrice, line.lineTotal,
+          ]
+        );
+
+        // Mutasi stok per komponen; qty dasar = qty komponen (integer) * qty paket.
+        const movements = new Map();
+        for (const component of line.components) {
+          const baseQty = component.qtyPerBundle * line.qty;
+          const existing = movements.get(component.productId);
+          movements.set(component.productId, {
+            baseQty: (existing?.baseQty || 0) + baseQty,
+            baseCostPrice: component.baseCostPrice,
+          });
+        }
+        for (const [productId, mv] of movements) {
+          await applyStockMovement(client, {
+            productId,
+            qtyChange: -mv.baseQty,
+            type: 'sale',
+            refType: 'sale',
+            refId: sale.id,
+            unitCost: mv.baseCostPrice,
+            note: `${invoiceNo} (paket ${line.bundle.name})`,
+            userId: req.user.id,
+            allowNegative: allowNegativeStock,
+          });
+        }
       }
 
       // Simpan pembayaran.
@@ -373,9 +476,12 @@ const loadSaleDetail = async (runner, whereClause, params) => {
 
   const items = await runner.query(
     `SELECT si.*, p.sku, p.name AS product_name, p.base_unit,
+            b.name AS bundle_name, b.sku AS bundle_sku,
+            COALESCE(p.name, b.name) AS display_name,
             si.returned_qty
      FROM sale_items si
-     JOIN products p ON p.id = si.product_id
+     LEFT JOIN products p ON p.id = si.product_id
+     LEFT JOIN bundles b ON b.id = si.bundle_id
      WHERE si.sale_id = $1
      ORDER BY si.id`,
     [sale.id]
@@ -443,10 +549,37 @@ router.post('/:id/void', async (req, res, next) => {
       for (const item of items.rows) {
         // Hanya kembalikan qty yang belum pernah diretur, agar stok tidak
         // bertambah dua kali (retur sudah menambah stok).
+        const unreturnedQty = item.qty - item.returned_qty;
+        if (unreturnedQty <= 0) continue;
+
+        // Baris paket: kembalikan stok tiap komponen sesuai qty paket.
+        if (item.bundle_id) {
+          const components = await client.query(
+            `SELECT bi.product_id, bi.qty, p.cost_price, p.name
+             FROM bundle_items bi
+             JOIN products p ON p.id = bi.product_id
+             WHERE bi.bundle_id = $1`,
+            [item.bundle_id]
+          );
+          for (const component of components.rows) {
+            await applyStockMovement(client, {
+              productId: component.product_id,
+              qtyChange: component.qty * unreturnedQty,
+              type: 'void',
+              refType: 'sale',
+              refId: sale.id,
+              unitCost: Number(component.cost_price),
+              note: `Void ${sale.invoice_no}`,
+              userId: req.user.id,
+              allowNegative: true,
+            });
+          }
+          continue;
+        }
+
         const unreturnedBaseQty = Math.round(
-          (item.base_qty / item.qty) * (item.qty - item.returned_qty)
+          (item.base_qty / item.qty) * unreturnedQty
         );
-        if (unreturnedBaseQty <= 0) continue;
 
         await applyStockMovement(client, {
           productId: item.product_id,

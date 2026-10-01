@@ -51,7 +51,10 @@ const Receipt = ({ sale, settings, change = 0, title = 'STRUK PEMBELIAN', paperW
 
         {items.map((item) => (
           <div key={item.id} style={{ marginBottom: '3px' }}>
-            <div>{item.product_name}</div>
+            <div>
+              {item.display_name || item.product_name || item.bundle_name || '-'}
+              {item.bundle_id ? ' (PAKET)' : ''}
+            </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span>
                 {item.qty} {item.unit_name || ''} x {formatCurrency(item.unit_price)}

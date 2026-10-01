@@ -52,6 +52,9 @@ app.use('/api/categories', require('./routes/categories'));
 app.use('/api/suppliers', require('./routes/suppliers'));
 app.use('/api/products', require('./routes/products'));
 app.use('/api/promotions', require('./routes/promotions'));
+app.use('/api/bundles', require('./routes/bundles'));
+app.use('/api/consignment', require('./routes/consignment'));
+app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/members', require('./routes/members'));
 app.use('/api/stock', require('./routes/stock'));
 app.use('/api/purchases', require('./routes/purchases'));
@@ -76,12 +79,36 @@ const assertFeatureSchema = async () => {
       sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
             WHERE table_name = 'sale_items' AND column_name IN ('promo_id', 'tier_id')`,
     },
+    // P2: bundling, konsinyasi, absensi.
+    { name: 'tabel bundles', sql: "SELECT to_regclass('public.bundles') AS ok" },
+    { name: 'tabel bundle_items', sql: "SELECT to_regclass('public.bundle_items') AS ok" },
+    {
+      name: 'kolom sale_items.bundle_id',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'sale_items' AND column_name = 'bundle_id'`,
+    },
+    { name: 'tabel consignors', sql: "SELECT to_regclass('public.consignors') AS ok" },
+    { name: 'tabel consignment_payouts', sql: "SELECT to_regclass('public.consignment_payouts') AS ok" },
+    {
+      name: 'kolom products.is_consignment/consignor_id',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'products' AND column_name IN ('is_consignment', 'consignor_id')`,
+    },
+    { name: 'tabel attendance', sql: "SELECT to_regclass('public.attendance') AS ok" },
+    {
+      name: 'kolom attendance.shift_id',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'attendance' AND column_name = 'shift_id'`,
+    },
   ];
 
   for (const check of required) {
     const result = await pool.query(check.sql);
     const row = result.rows[0];
-    const ok = check.name.startsWith('kolom') ? row.ok === 2 : Boolean(row.ok);
+    const expected = check.name.startsWith('kolom sale_items.promo_id') ? 2
+      : check.name.startsWith('kolom products.is_consignment') ? 2
+        : null;
+    const ok = expected === null ? Boolean(row.ok) : row.ok === expected;
     if (!ok) {
       throw new Error(
         `Skema fitur belum diterapkan (${check.name}). Jalankan migrasi: backend/init.sql ` +

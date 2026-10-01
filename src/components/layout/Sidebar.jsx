@@ -1,11 +1,14 @@
 import { NavLink, useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   LayoutDashboard, ShoppingCart, Receipt, Package, Tags, Truck, Boxes,
   ClipboardList, ShoppingBag, Users, Clock, BarChart3, UserCog, Settings,
-  LogOut, ChevronLeft, ChevronRight, Lock, Store, BadgePercent,
+  LogOut, ChevronLeft, ChevronRight, Lock, Store, BadgePercent, PackagePlus,
+  HandCoins, CalendarCheck, LogIn, LogOut as LogOutIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../api/client';
+import { useToastContext } from '../../context/ToastContext';
 
 // Menu dikelompokkan; `adminOnly` menyembunyikan item dari kasir.
 const MENU = [
@@ -16,6 +19,7 @@ const MENU = [
       { path: '/pos', name: 'Kasir', icon: ShoppingCart },
       { path: '/transactions', name: 'Transaksi', icon: Receipt },
       { path: '/shifts', name: 'Shift', icon: Clock },
+      { path: '/attendance', name: 'Absensi', icon: CalendarCheck },
     ],
   },
   {
@@ -23,6 +27,8 @@ const MENU = [
     items: [
       { path: '/products', name: 'Produk', icon: Package, adminOnly: true },
       { path: '/promotions', name: 'Promo', icon: BadgePercent, adminOnly: true },
+      { path: '/bundles', name: 'Paket', icon: PackagePlus, adminOnly: true },
+      { path: '/consignment', name: 'Konsinyasi', icon: HandCoins, adminOnly: true },
       { path: '/categories', name: 'Kategori', icon: Tags, adminOnly: true },
       { path: '/suppliers', name: 'Supplier', icon: Truck, adminOnly: true },
       { path: '/stock', name: 'Stok', icon: Boxes, adminOnly: true },
@@ -49,7 +55,52 @@ const MENU = [
 const Sidebar = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { user, isAdmin, logout } = useAuth();
+  const toast = useToastContext();
   const navigate = useNavigate();
+
+  // Absensi hari ini untuk tombol cepat di sidebar (kasir & admin).
+  const [attendance, setAttendance] = useState(null);
+  const [attendanceBusy, setAttendanceBusy] = useState(false);
+
+  const loadAttendance = useCallback(async () => {
+    try {
+      const rows = await api.get('/api/attendance/me');
+      const today = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const todayIso = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+      setAttendance((rows || []).find((r) => String(r.work_date).slice(0, 10) === todayIso) || null);
+    } catch {
+      // Diamkan: tombol absen tidak boleh menghalangi navigasi.
+    }
+  }, []);
+
+  useEffect(() => { loadAttendance(); }, [loadAttendance]);
+
+  const handleCheckIn = async () => {
+    setAttendanceBusy(true);
+    try {
+      await api.post('/api/attendance/check-in', {});
+      toast.success('Absen masuk tercatat');
+      loadAttendance();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAttendanceBusy(false);
+    }
+  };
+
+  const handleCheckOut = async () => {
+    setAttendanceBusy(true);
+    try {
+      await api.post('/api/attendance/check-out', {});
+      toast.success('Absen pulang tercatat');
+      loadAttendance();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAttendanceBusy(false);
+    }
+  };
 
   const handleLogout = () => {
     logout();
@@ -121,6 +172,36 @@ const Sidebar = () => {
             </p>
           </div>
         ) : null}
+
+        {/* Absen masuk/pulang cepat. Setelah masuk & belum pulang, tampilkan tombol pulang. */}
+        {attendance?.check_in && !attendance?.check_out ? (
+          <button
+            onClick={handleCheckOut}
+            disabled={attendanceBusy}
+            className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-orange hover:bg-ios-orange/10 transition-colors disabled:opacity-50 ${isCollapsed ? 'justify-center' : ''}`}
+            title="Absen Pulang"
+          >
+            <LogOutIcon size={18} />
+            {!isCollapsed && <span>Absen Pulang</span>}
+          </button>
+        ) : !attendance ? (
+          <button
+            onClick={handleCheckIn}
+            disabled={attendanceBusy}
+            className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-green hover:bg-ios-green/10 transition-colors disabled:opacity-50 ${isCollapsed ? 'justify-center' : ''}`}
+            title="Absen Masuk"
+          >
+            <LogIn size={18} />
+            {!isCollapsed && <span>Absen Masuk</span>}
+          </button>
+        ) : (
+          !isCollapsed && (
+            <div className="px-2 mb-1 text-xs text-slate-500 flex items-center gap-1">
+              <CalendarCheck size={12} /> Absensi hari ini selesai
+            </div>
+          )
+        )}
+
         <button
           onClick={handleLogout}
           className={`flex items-center gap-2 w-full p-2.5 rounded-xl text-sm text-ios-red hover:bg-ios-red/10 transition-colors ${isCollapsed ? 'justify-center' : ''}`}

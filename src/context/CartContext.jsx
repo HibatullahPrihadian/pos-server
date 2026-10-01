@@ -3,13 +3,15 @@ import { createContext, useContext, useState, useCallback, useMemo } from 'react
 const CartContext = createContext();
 
 // Item keranjang: { product_id, unit_id, unit_name, name, sku, price, qty, discount, stock_available, conversion_factor }
+// Item paket: { bundle_id, name, sku, price, qty, discount, is_bundle: true }
 const CartProvider = ({ children }) => {
   const [items, setItems] = useState([]);
   const [member, setMember] = useState(null);
   const [txnDiscount, setTxnDiscount] = useState(0);
   const [redeemPoints, setRedeemPoints] = useState(0);
 
-  const keyOf = (item) => `${item.product_id}:${item.unit_id || 'base'}`;
+  const keyOf = (item) =>
+    item.bundle_id ? `bundle:${item.bundle_id}` : `${item.product_id}:${item.unit_id || 'base'}`;
 
   const addItem = useCallback((product, unit, price, qty = 1) => {
     const line = {
@@ -35,8 +37,39 @@ const CartProvider = ({ children }) => {
     });
   }, []);
 
+  // Tambah paket ke keranjang. Harga paket tetap (tidak lewat resolver tier/promo).
+  const addBundle = useCallback((bundle, qty = 1) => {
+    const line = {
+      bundle_id: bundle.id,
+      is_bundle: true,
+      name: bundle.name,
+      sku: bundle.sku,
+      price: Number(bundle.price),
+      qty,
+      discount: 0,
+    };
+
+    setItems((prev) => {
+      const key = keyOf(line);
+      const existing = prev.find((i) => keyOf(i) === key);
+      if (existing) {
+        return prev.map((i) => (keyOf(i) === key ? { ...i, qty: i.qty + qty } : i));
+      }
+      return [...prev, line];
+    });
+  }, []);
+
   const updateQty = useCallback((productId, unitId, qty) => {
     const key = `${productId}:${unitId || 'base'}`;
+    setItems((prev) =>
+      prev
+        .map((i) => (keyOf(i) === key ? { ...i, qty: Math.max(0, qty) } : i))
+        .filter((i) => i.qty > 0)
+    );
+  }, []);
+
+  // Update qty berdasarkan key kanonik (mendukung produk & paket).
+  const updateQtyByKey = useCallback((key, qty) => {
     setItems((prev) =>
       prev
         .map((i) => (keyOf(i) === key ? { ...i, qty: Math.max(0, qty) } : i))
@@ -49,6 +82,10 @@ const CartProvider = ({ children }) => {
     setItems((prev) => prev.map((i) => (keyOf(i) === key ? { ...i, discount: Math.max(0, discount) } : i)));
   }, []);
 
+  const updateDiscountByKey = useCallback((key, discount) => {
+    setItems((prev) => prev.map((i) => (keyOf(i) === key ? { ...i, discount: Math.max(0, discount) } : i)));
+  }, []);
+
   // Perbarui harga satuan + info promo/tier berdasarkan hasil kalkulasi server.
   // Server tetap penentu akhir saat checkout; ini hanya sinkronisasi tampilan.
   const applyQuotes = useCallback((quotes) => {
@@ -56,6 +93,7 @@ const CartProvider = ({ children }) => {
     const map = new Map(quotes.map((q) => [`${q.product_id}:${q.unit_id || 'base'}`, q]));
     setItems((prev) =>
       prev.map((i) => {
+        if (i.bundle_id) return i;
         const q = map.get(keyOf(i));
         if (!q || !Number.isFinite(Number(q.effective_price))) return i;
         return {
@@ -70,6 +108,10 @@ const CartProvider = ({ children }) => {
 
   const removeItem = useCallback((productId, unitId) => {
     const key = `${productId}:${unitId || 'base'}`;
+    setItems((prev) => prev.filter((i) => keyOf(i) !== key));
+  }, []);
+
+  const removeItemByKey = useCallback((key) => {
     setItems((prev) => prev.filter((i) => keyOf(i) !== key));
   }, []);
 
@@ -97,10 +139,15 @@ const CartProvider = ({ children }) => {
     redeemPoints,
     setRedeemPoints,
     addItem,
+    addBundle,
     updateQty,
+    updateQtyByKey,
     updateDiscount,
+    updateDiscountByKey,
     applyQuotes,
     removeItem,
+    removeItemByKey,
+    keyOf,
     clear,
     totals,
   };

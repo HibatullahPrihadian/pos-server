@@ -62,9 +62,12 @@ router.get('/:id', async (req, res, next) => {
     if (!result.rows[0]) throw new HttpError(404, 'Retur tidak ditemukan');
 
     const items = await pool.query(
-      `SELECT ri.*, p.sku, p.name AS product_name
+      `SELECT ri.*, p.sku, p.name AS product_name,
+              b.name AS bundle_name, b.sku AS bundle_sku,
+              COALESCE(p.name, b.name) AS display_name
        FROM return_items ri
-       JOIN products p ON p.id = ri.product_id
+       LEFT JOIN products p ON p.id = ri.product_id
+       LEFT JOIN bundles b ON b.id = ri.bundle_id
        WHERE ri.return_id = $1 ORDER BY ri.id`,
       [req.params.id]
     );
@@ -149,15 +152,43 @@ router.post('/', async (req, res, next) => {
 
       for (const entry of prepared) {
         await client.query(
-          `INSERT INTO return_items (return_id, sale_item_id, product_id, qty, unit_price, refund_amount)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [ret.id, entry.item.id, entry.item.product_id, entry.qty, entry.item.unit_price, entry.refund]
+          `INSERT INTO return_items (return_id, sale_item_id, product_id, bundle_id, qty, unit_price, refund_amount)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [
+            ret.id, entry.item.id, entry.item.product_id, entry.item.bundle_id,
+            entry.qty, entry.item.unit_price, entry.refund,
+          ]
         );
 
         await client.query(
           'UPDATE sale_items SET returned_qty = returned_qty + $1 WHERE id = $2',
           [entry.qty, entry.item.id]
         );
+
+        // Baris paket: kembalikan stok tiap komponen sesuai qty paket (HPP asli komponen).
+        if (entry.item.bundle_id) {
+          const components = await client.query(
+            `SELECT bi.product_id, bi.qty, p.cost_price
+             FROM bundle_items bi
+             JOIN products p ON p.id = bi.product_id
+             WHERE bi.bundle_id = $1`,
+            [entry.item.bundle_id]
+          );
+          for (const component of components.rows) {
+            await applyStockMovement(client, {
+              productId: component.product_id,
+              qtyChange: component.qty * entry.qty,
+              type: 'return',
+              refType: 'return',
+              refId: ret.id,
+              unitCost: Number(component.cost_price),
+              note: `Retur ${code}`,
+              userId: req.user.id,
+              allowNegative: true,
+            });
+          }
+          continue;
+        }
 
         const conversionFactor = entry.item.base_qty / entry.item.qty;
 
