@@ -1,0 +1,67 @@
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { api, getToken, setToken } from '../api/client';
+
+const AuthContext = createContext();
+
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const logout = useCallback(() => {
+    setToken(null);
+    setUser(null);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (!getToken()) {
+      setUser(null);
+      setLoading(false);
+      return null;
+    }
+    try {
+      const me = await api.get('/api/auth/me');
+      setUser(me);
+      return me;
+    } catch {
+      logout();
+      return null;
+    } finally {
+      setLoading(false);
+    }
+  }, [logout]);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  // Logout otomatis ketika API mengembalikan 401.
+  useEffect(() => {
+    const onUnauthorized = () => setUser(null);
+    window.addEventListener('pos:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('pos:unauthorized', onUnauthorized);
+  }, []);
+
+  const login = async (username, password) => {
+    const data = await api.post('/api/auth/login', { username, password });
+    setToken(data.token);
+    setUser(data.user);
+    return data.user;
+  };
+
+  const value = {
+    user,
+    loading,
+    login,
+    logout,
+    refresh,
+    isAdmin: user?.role === 'admin',
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) throw new Error('useAuth harus dipakai di dalam AuthProvider');
+  return context;
+};

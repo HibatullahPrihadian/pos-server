@@ -1,0 +1,474 @@
+const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const pool = require('../db');
+const { requireRole } = require('../middleware/auth');
+const { HttpError } = require('../middleware/error');
+const { getPagination, paginated, toInt } = require('../utils/pagination');
+const { requireString, cleanString, toBool } = require('../utils/validate');
+const { parseCsv, sendCsv } = require('../utils/csv');
+const { imageUpload, uploadRoot, publicPath } = require('../utils/upload');
+const { logAudit } = require('../utils/audit');
+
+const router = express.Router();
+
+const SELECT_PRODUCT = `
+  SELECT p.*,
+         c.name AS category_name,
+         s.name AS supplier_name
+  FROM products p
+  LEFT JOIN categories c ON c.id = p.category_id
+  LEFT JOIN suppliers s ON s.id = p.supplier_id
+`;
+
+const normalizeMoney = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Math.round(Number(String(value).replace(/[^\d.-]/g, '')));
+  return Number.isFinite(n) ? n : null;
+};
+
+const normalizeQty = (value) => {
+  const n = Math.round(Number(String(value ?? '').replace(/[^\d.-]/g, '')));
+  return Number.isFinite(n) ? n : 0;
+};
+
+const validateProductBody = (body, { partial = false } = {}) => {
+  const value = {};
+
+  if (!partial || 'sku' in body) {
+    const sku = requireString(body?.sku, 'SKU', 50);
+    if (sku.error) return { error: sku.error };
+    value.sku = sku.value;
+  }
+
+  if (!partial || 'name' in body) {
+    const name = requireString(body?.name, 'Nama produk', 200);
+    if (name.error) return { error: name.error };
+    value.name = name.value;
+  }
+
+  if (!partial || 'base_unit' in body) {
+    const unit = requireString(body?.base_unit, 'Satuan dasar', 20);
+    if (unit.error) return { error: unit.error };
+    value.base_unit = unit.value.toLowerCase();
+  }
+
+  if (!partial || 'sell_price' in body) {
+    const sellPrice = normalizeMoney(body?.sell_price);
+    if (sellPrice === null || sellPrice < 0) return { error: 'Harga jual tidak valid' };
+    value.sell_price = sellPrice;
+  }
+
+  if (!partial || 'cost_price' in body) {
+    value.cost_price = normalizeMoney(body?.cost_price) ?? 0;
+  }
+
+  if ('barcode' in body) value.barcode = cleanString(body.barcode, 50);
+  if ('member_price' in body) {
+    const mp = normalizeMoney(body.member_price);
+    value.member_price = mp === null || mp < 0 ? null : mp;
+  }
+  if ('min_stock' in body) value.min_stock = Math.max(0, normalizeQty(body.min_stock));
+  if ('category_id' in body) {
+    const cid = toInt(body.category_id, 0);
+    value.category_id = cid > 0 ? cid : null;
+  }
+  if ('supplier_id' in body) {
+    const sid = toInt(body.supplier_id, 0);
+    value.supplier_id = sid > 0 ? sid : null;
+  }
+  if ('is_active' in body) value.is_active = toBool(body.is_active, true);
+
+  return { value };
+};
+
+router.get('/', async (req, res, next) => {
+  try {
+    const { page, limit, offset } = getPagination(req.query);
+    const search = cleanString(req.query.search, 100);
+    const categoryId = toInt(req.query.category_id, 0);
+    const supplierId = toInt(req.query.supplier_id, 0);
+    const lowStock = toBool(req.query.low_stock, false);
+    const activeOnly = req.query.is_active === undefined ? true : toBool(req.query.is_active, true);
+
+    const conditions = [];
+    const params = [];
+
+    if (activeOnly) conditions.push('p.is_active = TRUE');
+    if (search) {
+      params.push(`%${search.toLowerCase()}%`);
+      conditions.push(
+        `(LOWER(p.name) LIKE $${params.length} OR LOWER(p.sku) LIKE $${params.length} OR LOWER(COALESCE(p.barcode, '')) LIKE $${params.length})`
+      );
+    }
+    if (categoryId > 0) {
+      params.push(categoryId);
+      conditions.push(`p.category_id = $${params.length}`);
+    }
+    if (supplierId > 0) {
+      params.push(supplierId);
+      conditions.push(`p.supplier_id = $${params.length}`);
+    }
+    if (lowStock) conditions.push('p.stock_qty <= p.min_stock');
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM products p ${where}`,
+      params
+    );
+
+    params.push(limit, offset);
+    const result = await pool.query(
+      `${SELECT_PRODUCT} ${where} ORDER BY p.name LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json(paginated(result.rows, countResult.rows[0].total, page, limit));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Cari berdasarkan barcode produk atau barcode satuan.
+router.get('/barcode/:barcode', async (req, res, next) => {
+  try {
+    const barcode = String(req.params.barcode || '').trim();
+    if (!barcode) throw new HttpError(400, 'Barcode wajib diisi');
+
+    const productResult = await pool.query(
+      `${SELECT_PRODUCT} WHERE p.barcode = $1 AND p.is_active = TRUE`,
+      [barcode]
+    );
+
+    let product = productResult.rows[0];
+    let matchedUnit = null;
+
+    if (!product) {
+      const unitResult = await pool.query(
+        `SELECT pu.*, p.id AS product_id FROM product_units pu
+         JOIN products p ON p.id = pu.product_id
+         WHERE pu.barcode = $1 AND p.is_active = TRUE`,
+        [barcode]
+      );
+      if (unitResult.rows[0]) {
+        matchedUnit = unitResult.rows[0];
+        const p = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1`, [matchedUnit.product_id]);
+        product = p.rows[0];
+      }
+    }
+
+    if (!product) throw new HttpError(404, 'Produk tidak ditemukan');
+
+    const units = await pool.query(
+      'SELECT * FROM product_units WHERE product_id = $1 ORDER BY conversion_factor',
+      [product.id]
+    );
+
+    res.json({ product, units: units.rows, matched_unit: matchedUnit });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/export', async (req, res, next) => {
+  try {
+    const result = await pool.query(`${SELECT_PRODUCT} ORDER BY p.name`);
+    const rows = result.rows.map((p) => ({
+      sku: p.sku,
+      barcode: p.barcode || '',
+      name: p.name,
+      category: p.category_name || '',
+      supplier: p.supplier_name || '',
+      base_unit: p.base_unit,
+      cost_price: p.cost_price,
+      sell_price: p.sell_price,
+      member_price: p.member_price ?? '',
+      min_stock: p.min_stock,
+      stock_qty: p.stock_qty,
+      is_active: p.is_active,
+    }));
+    sendCsv(res, 'produk.csv', rows, [
+      'sku', 'barcode', 'name', 'category', 'supplier', 'base_unit',
+      'cost_price', 'sell_price', 'member_price', 'min_stock', 'stock_qty', 'is_active',
+    ]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:id', async (req, res, next) => {
+  try {
+    const result = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1`, [req.params.id]);
+    if (!result.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
+    const units = await pool.query(
+      'SELECT * FROM product_units WHERE product_id = $1 ORDER BY conversion_factor',
+      [req.params.id]
+    );
+    res.json({ ...result.rows[0], units: units.rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/', requireRole('admin'), async (req, res, next) => {
+  try {
+    const { value, error } = validateProductBody(req.body || {});
+    if (error) throw new HttpError(400, error);
+
+    const result = await pool.query(
+      `INSERT INTO products
+        (sku, barcode, name, category_id, supplier_id, base_unit, cost_price, sell_price, member_price, min_stock)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [
+        value.sku, value.barcode || null, value.name, value.category_id || null,
+        value.supplier_id || null, value.base_unit, value.cost_price ?? 0, value.sell_price,
+        value.member_price ?? null, value.min_stock ?? 0,
+      ]
+    );
+    await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'products', entityId: result.rows[0].id });
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/:id', requireRole('admin'), async (req, res, next) => {
+  try {
+    const { value, error } = validateProductBody(req.body || {}, { partial: true });
+    if (error) throw new HttpError(400, error);
+
+    const keys = Object.keys(value);
+    if (keys.length === 0) throw new HttpError(400, 'Tidak ada perubahan');
+
+    const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
+    const values = keys.map((key) => (key === 'barcode' || key === 'member_price' ? value[key] ?? null : value[key]));
+
+    values.push(req.params.id);
+    const result = await pool.query(
+      `UPDATE products SET ${setClause}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`,
+      values
+    );
+    if (!result.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
+    await logAudit(pool, { userId: req.user.id, action: 'update', entity: 'products', entityId: Number(req.params.id) });
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Nonaktifkan produk (soft delete) agar riwayat transaksi tetap utuh.
+router.delete('/:id', requireRole('admin'), async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      'UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id',
+      [req.params.id]
+    );
+    if (!result.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
+    await logAudit(pool, { userId: req.user.id, action: 'deactivate', entity: 'products', entityId: Number(req.params.id) });
+    res.json({ message: 'Produk dinonaktifkan' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/image', requireRole('admin'), imageUpload.single('image'), async (req, res, next) => {
+  try {
+    if (!req.file) throw new HttpError(400, 'File gambar wajib diunggah');
+
+    const current = await pool.query('SELECT image_path FROM products WHERE id = $1', [req.params.id]);
+    if (!current.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
+
+    if (current.rows[0].image_path) {
+      const oldFile = path.join(uploadRoot, path.basename(current.rows[0].image_path));
+      fs.promises.unlink(oldFile).catch(() => {});
+    }
+
+    const relative = publicPath(req.file.filename);
+    const result = await pool.query(
+      'UPDATE products SET image_path = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+      [relative, req.params.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================
+// Impor CSV (admin)
+// =========================================================
+router.post('/import', requireRole('admin'), imageUpload.single('file'), async (req, res, next) => {
+  try {
+    let text = '';
+    if (req.file) {
+      text = await fs.promises.readFile(req.file.path, 'utf8');
+      await fs.promises.unlink(req.file.path).catch(() => {});
+    } else if (typeof req.body?.csv === 'string') {
+      text = req.body.csv;
+    } else {
+      throw new HttpError(400, 'File CSV wajib diunggah (field: file)');
+    }
+
+    const rows = parseCsv(text);
+    if (rows.length === 0) throw new HttpError(400, 'CSV kosong atau tidak valid');
+
+    const categories = await pool.query('SELECT id, name FROM categories');
+    const suppliers = await pool.query('SELECT id, name FROM suppliers');
+    const categoryMap = new Map(categories.rows.map((r) => [r.name.toLowerCase(), r.id]));
+    const supplierMap = new Map(suppliers.rows.map((r) => [r.name.toLowerCase(), r.id]));
+
+    const imported = [];
+    const errors = [];
+
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      const line = i + 2;
+      const sku = cleanString(row.sku, 50);
+      const name = cleanString(row.name, 200);
+
+      if (!sku || !name) {
+        errors.push({ line, error: 'sku dan name wajib diisi' });
+        continue;
+      }
+
+      const sellPrice = normalizeMoney(row.sell_price);
+      if (sellPrice === null || sellPrice < 0) {
+        errors.push({ line, sku, error: 'sell_price tidak valid' });
+        continue;
+      }
+
+      const categoryName = cleanString(row.category, 100);
+      let categoryId = null;
+      if (categoryName) {
+        const key = categoryName.toLowerCase();
+        if (!categoryMap.has(key)) {
+          const inserted = await pool.query(
+            'INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id',
+            [categoryName]
+          );
+          categoryMap.set(key, inserted.rows[0].id);
+        }
+        categoryId = categoryMap.get(key);
+      }
+
+      const supplierName = cleanString(row.supplier, 150);
+      let supplierId = null;
+      if (supplierName) {
+        const key = supplierName.toLowerCase();
+        if (!supplierMap.has(key)) {
+          const inserted = await pool.query('INSERT INTO suppliers (name) VALUES ($1) RETURNING id', [supplierName]);
+          supplierMap.set(key, inserted.rows[0].id);
+        }
+        supplierId = supplierMap.get(key);
+      }
+
+      const stockQty = Math.max(0, normalizeQty(row.stock_qty));
+      const costPrice = normalizeMoney(row.cost_price) ?? 0;
+      const memberPrice = normalizeMoney(row.member_price);
+      const minStock = Math.max(0, normalizeQty(row.min_stock));
+      const barcode = cleanString(row.barcode, 50);
+      const baseUnit = (cleanString(row.base_unit, 20) || 'pcs').toLowerCase();
+      const isActive = row.is_active === undefined || row.is_active === ''
+        ? true
+        : toBool(row.is_active, true);
+
+      try {
+        const result = await pool.query(
+          `INSERT INTO products
+            (sku, barcode, name, category_id, supplier_id, base_unit, cost_price, sell_price, member_price, min_stock, stock_qty, is_active)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           ON CONFLICT (sku) DO UPDATE SET
+             barcode = EXCLUDED.barcode,
+             name = EXCLUDED.name,
+             category_id = EXCLUDED.category_id,
+             supplier_id = EXCLUDED.supplier_id,
+             base_unit = EXCLUDED.base_unit,
+             cost_price = EXCLUDED.cost_price,
+             sell_price = EXCLUDED.sell_price,
+             member_price = EXCLUDED.member_price,
+             min_stock = EXCLUDED.min_stock,
+             is_active = EXCLUDED.is_active,
+             updated_at = NOW()
+           RETURNING id, sku, stock_qty`,
+          [
+            sku, barcode, name, categoryId, supplierId, baseUnit, costPrice,
+            sellPrice, memberPrice, minStock, stockQty, isActive,
+          ]
+        );
+        imported.push({ line, id: result.rows[0].id, sku: result.rows[0].sku });
+      } catch (rowErr) {
+        errors.push({ line, sku, error: rowErr.message });
+      }
+    }
+
+    await logAudit(pool, {
+      userId: req.user.id,
+      action: 'import',
+      entity: 'products',
+      detail: { imported: imported.length, failed: errors.length },
+    });
+
+    res.json({ imported: imported.length, failed: errors.length, errors });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================
+// Satuan produk
+// =========================================================
+router.get('/:id/units', async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      'SELECT * FROM product_units WHERE product_id = $1 ORDER BY conversion_factor',
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/units', requireRole('admin'), async (req, res, next) => {
+  try {
+    const unitName = requireString(req.body?.unit_name, 'Nama satuan', 20);
+    if (unitName.error) throw new HttpError(400, unitName.error);
+
+    const factor = Math.round(Number(req.body?.conversion_factor));
+    if (!Number.isFinite(factor) || factor <= 0) {
+      throw new HttpError(400, 'Faktor konversi harus bilangan bulat positif');
+    }
+
+    const sellPrice = normalizeMoney(req.body?.sell_price);
+    if (sellPrice === null || sellPrice < 0) throw new HttpError(400, 'Harga jual satuan tidak valid');
+
+    const memberPrice = normalizeMoney(req.body?.member_price);
+    const barcode = cleanString(req.body?.barcode, 50);
+
+    const result = await pool.query(
+      `INSERT INTO product_units (product_id, unit_name, conversion_factor, sell_price, member_price, barcode)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [req.params.id, unitName.value.toLowerCase(), factor, sellPrice, memberPrice, barcode]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id/units/:unitId', requireRole('admin'), async (req, res, next) => {
+  try {
+    const result = await pool.query(
+      'DELETE FROM product_units WHERE id = $1 AND product_id = $2 RETURNING id',
+      [req.params.unitId, req.params.id]
+    );
+    if (!result.rows[0]) throw new HttpError(404, 'Satuan tidak ditemukan');
+    res.json({ message: 'Satuan dihapus' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+module.exports = router;

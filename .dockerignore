@@ -1,0 +1,11 @@
+node_modules
+dist
+*.log
+.env
+.env.*
+.git
+.gitignore
+.kilo
+README.md
+backend/node_modules
+backend/uploads

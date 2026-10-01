@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #121212;
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(10, 132, 255, 0.18), transparent 45%),
+    radial-gradient(circle at 90% 80%, rgba(48, 209, 88, 0.14), transparent 45%),
+    radial-gradient(circle at 50% 50%, rgba(191, 90, 242, 0.16), transparent 55%);
+  background-attachment: fixed;
+  color: #f2f2f7;
+  min-height: 100vh;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Sembunyikan spinner input number untuk tampilan kasir yang bersih. */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* =========================================================
+   Struk (58mm/80mm) - hanya area struk yang tercetak.
+   ========================================================= */
+.receipt-paper {
+  width: 72mm;
+  padding: 3mm 2mm;
+  background: #ffffff;
+  color: #000000;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.receipt-paper.receipt-58 {
+  width: 54mm;
+}
+
+.receipt-sep {
+  border-top: 1px dashed #000;
+  margin: 4px 0;
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  body {
+    background: #ffffff !important;
+    background-image: none !important;
+    color: #000000 !important;
+  }
+
+  /* Sembunyikan seluruh aplikasi kecuali area cetak. */
+  body * {
+    visibility: hidden;
+  }
+
+  #receipt-print-area,
+  #receipt-print-area * {
+    visibility: visible;
+  }
+
+  #receipt-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}

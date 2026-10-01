@@ -1,0 +1,97 @@
+import { createContext, useContext, useState, useCallback, useMemo } from 'react';
+
+const CartContext = createContext();
+
+// Item keranjang: { product_id, unit_id, unit_name, name, sku, price, qty, discount, stock_available, conversion_factor }
+const CartProvider = ({ children }) => {
+  const [items, setItems] = useState([]);
+  const [member, setMember] = useState(null);
+  const [txnDiscount, setTxnDiscount] = useState(0);
+  const [redeemPoints, setRedeemPoints] = useState(0);
+
+  const keyOf = (item) => `${item.product_id}:${item.unit_id || 'base'}`;
+
+  const addItem = useCallback((product, unit, price, qty = 1) => {
+    const line = {
+      product_id: product.id,
+      unit_id: unit ? unit.id : null,
+      unit_name: unit ? unit.unit_name : product.base_unit,
+      name: product.name,
+      sku: product.sku,
+      price: Number(price),
+      qty,
+      discount: 0,
+      stock_available: Number(product.stock_qty),
+      conversion_factor: unit ? unit.conversion_factor : 1,
+    };
+
+    setItems((prev) => {
+      const key = keyOf(line);
+      const existing = prev.find((i) => keyOf(i) === key);
+      if (existing) {
+        return prev.map((i) => (keyOf(i) === key ? { ...i, qty: i.qty + qty } : i));
+      }
+      return [...prev, line];
+    });
+  }, []);
+
+  const updateQty = useCallback((productId, unitId, qty) => {
+    const key = `${productId}:${unitId || 'base'}`;
+    setItems((prev) =>
+      prev
+        .map((i) => (keyOf(i) === key ? { ...i, qty: Math.max(0, qty) } : i))
+        .filter((i) => i.qty > 0)
+    );
+  }, []);
+
+  const updateDiscount = useCallback((productId, unitId, discount) => {
+    const key = `${productId}:${unitId || 'base'}`;
+    setItems((prev) => prev.map((i) => (keyOf(i) === key ? { ...i, discount: Math.max(0, discount) } : i)));
+  }, []);
+
+  const removeItem = useCallback((productId, unitId) => {
+    const key = `${productId}:${unitId || 'base'}`;
+    setItems((prev) => prev.filter((i) => keyOf(i) !== key));
+  }, []);
+
+  const clear = useCallback(() => {
+    setItems([]);
+    setMember(null);
+    setTxnDiscount(0);
+    setRedeemPoints(0);
+  }, []);
+
+  const totals = useMemo(() => {
+    const subtotal = items.reduce((sum, i) => sum + i.price * i.qty, 0);
+    const itemDiscount = items.reduce((sum, i) => sum + i.discount, 0);
+    const afterItem = subtotal - itemDiscount;
+    const afterTxn = Math.max(0, afterItem - txnDiscount);
+    return { subtotal, itemDiscount, afterItem, afterTxn };
+  }, [items, txnDiscount]);
+
+  const value = {
+    items,
+    member,
+    setMember,
+    txnDiscount,
+    setTxnDiscount,
+    redeemPoints,
+    setRedeemPoints,
+    addItem,
+    updateQty,
+    updateDiscount,
+    removeItem,
+    clear,
+    totals,
+  };
+
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
+};
+
+export const useCart = () => {
+  const context = useContext(CartContext);
+  if (!context) throw new Error('useCart harus dipakai di dalam CartProvider');
+  return context;
+};
+
+export default CartProvider;
