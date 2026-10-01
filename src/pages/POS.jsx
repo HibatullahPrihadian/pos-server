@@ -95,6 +95,28 @@ const POS = () => {
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
+  // Sinkronkan harga efektif (tier/promo/member) dan info promo/tier dari server.
+  // Server tetap menghitung ulang saat checkout. Di-debounce + dibatalkan agar
+  // perubahan qty cepat tidak membanjiri API.
+  const quoteKey = JSON.stringify(cart.items.map((i) => [i.product_id, i.unit_id, i.qty]));
+  useEffect(() => {
+    if (cart.items.length === 0) return undefined;
+    let active = true;
+    const timer = setTimeout(() => {
+      const items = cart.items.map((i) => ({
+        product_id: i.product_id,
+        unit_id: i.unit_id,
+        qty: i.qty,
+      }));
+      api.post('/api/products/quote', { member_id: cart.member?.id || null, items })
+        .then((quote) => { if (active) cart.applyQuotes(quote); })
+        .catch(() => {});
+    }, 250);
+    return () => { active = false; clearTimeout(timer); };
+    // applyQuotes stabil (useCallback), sengaja tidak dimasukkan ke deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteKey, cart.member?.id]);
+
   useEffect(() => {
     if (!debouncedMemberSearch) { setMemberResults([]); return; }
     api.get('/api/members', { search: debouncedMemberSearch, limit: 10 })
@@ -401,6 +423,15 @@ const POS = () => {
                         <div className="text-xs text-slate-500">
                           {formatCurrency(item.price)} / {item.unit_name}
                         </div>
+                        {item.promo_name && (
+                          <div className="mt-1 flex items-center gap-1">
+                            <Badge tone="red">PROMO</Badge>
+                            <span className="text-[10px] text-ios-red truncate">{item.promo_name}</span>
+                          </div>
+                        )}
+                        {item.tier_min_qty && (
+                          <div className="mt-1 text-[10px] text-ios-green">Harga grosir berlaku (min {item.tier_min_qty})</div>
+                        )}
                       </div>
                       <button
                         onClick={() => cart.removeItem(item.product_id, item.unit_id)}

@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard';
 import POS from './pages/POS';
 import Transactions from './pages/Transactions';
 import Products from './pages/Products';
+import Promotions from './pages/Promotions';
 import Categories from './pages/Categories';
 import Suppliers from './pages/Suppliers';
 import Stock from './pages/Stock';
@@ -46,6 +47,7 @@ function App() {
                 <Route path="/shifts" element={<Page><Shifts /></Page>} />
 
                 <Route path="/products" element={<Page adminOnly><Products /></Page>} />
+                <Route path="/promotions" element={<Page adminOnly><Promotions /></Page>} />
                 <Route path="/categories" element={<Page adminOnly><Categories /></Page>} />
                 <Route path="/suppliers" element={<Page adminOnly><Suppliers /></Page>} />
                 <Route path="/stock" element={<Page adminOnly><Stock /></Page>} />

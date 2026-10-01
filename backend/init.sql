@@ -104,6 +104,83 @@ CREATE TABLE IF NOT EXISTS product_units (
     UNIQUE (product_id, unit_name)
 );
 
+-- Barcode tambahan per produk. `products.barcode` tetap barcode utama
+-- (backward-compatible). `unit_id` diisi bila barcode mewakili satuan tertentu.
+CREATE TABLE IF NOT EXISTS product_barcodes (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    barcode VARCHAR(50) UNIQUE NOT NULL,
+    unit_id INTEGER REFERENCES product_units(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Harga partai bertingkat. min_qty dihitung dalam satuan `unit_id`
+-- (NULL = satuan dasar). Tier hanya menurunkan harga normal.
+CREATE TABLE IF NOT EXISTS price_tiers (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    unit_id INTEGER REFERENCES product_units(id) ON DELETE CASCADE,
+    min_qty INTEGER NOT NULL CHECK (min_qty > 1),
+    price BIGINT NOT NULL CHECK (price >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (product_id, unit_id, min_qty)
+);
+
+-- Diskon promo berbasis periode (jam/hari/tanggal).
+-- scope='product' -> product_id wajib; scope='category' -> category_id wajib.
+-- discount_type='batch_price' -> discount_value adalah harga total untuk min_qty unit.
+CREATE TABLE IF NOT EXISTS promotions (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    scope VARCHAR(10) NOT NULL CHECK (scope IN ('product', 'category')),
+    product_id INTEGER REFERENCES products(id) ON DELETE CASCADE,
+    category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
+    unit_id INTEGER REFERENCES product_units(id) ON DELETE CASCADE,
+    discount_type VARCHAR(15) NOT NULL CHECK (discount_type IN ('percent', 'amount', 'batch_price')),
+    discount_value BIGINT NOT NULL CHECK (discount_value >= 0),
+    min_qty INTEGER NOT NULL DEFAULT 1 CHECK (min_qty > 0),
+    start_time TIME,
+    end_time TIME,
+    days_of_week SMALLINT[],
+    start_date DATE,
+    end_date DATE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT promotions_scope_target CHECK (
+        (scope = 'product' AND product_id IS NOT NULL AND category_id IS NULL)
+        OR (scope = 'category' AND category_id IS NOT NULL AND product_id IS NULL)
+    ),
+    CONSTRAINT promotions_time_range CHECK (
+        start_time IS NULL OR end_time IS NULL OR start_time <> end_time
+    )
+);
+
+-- Migrasi data barcode lama ke tabel multibarcode (idempotent).
+-- Unit diinsert lebih dulu agar barcode yang dipakai bersama produk & satuan tetap
+-- terpetakan ke satuan (lebih spesifik); lookup tetap fallback ke products.barcode.
+-- Peringatkan (bukan gagal) bila ada bentrok antar sumber agar tidak hilang diam-diam.
+DO $$
+DECLARE
+    conflict_count INTEGER;
+BEGIN
+    SELECT COUNT(*) INTO conflict_count
+    FROM products p
+    JOIN product_units pu ON pu.barcode = p.barcode
+    WHERE p.barcode IS NOT NULL;
+
+    IF conflict_count > 0 THEN
+        RAISE NOTICE 'Peringatan: % barcode dipakai bersama oleh produk dan satuan. Satuan diprioritaskan di product_barcodes.', conflict_count;
+    END IF;
+END $$;
+
+INSERT INTO product_barcodes (product_id, barcode, unit_id)
+SELECT product_id, barcode, id FROM product_units WHERE barcode IS NOT NULL
+ON CONFLICT (barcode) DO NOTHING;
+
+INSERT INTO product_barcodes (product_id, barcode, unit_id)
+SELECT id, barcode, NULL FROM products WHERE barcode IS NOT NULL
+ON CONFLICT (barcode) DO NOTHING;
+
 -- =========================================================
 -- Stok
 -- =========================================================
@@ -250,6 +327,11 @@ CREATE TABLE IF NOT EXISTS sale_items (
     returned_qty INTEGER NOT NULL DEFAULT 0
 );
 
+-- Jejak asal harga efektif (nullable). Ditambah lewat ALTER agar DB lama ikut ter-update,
+-- karena CREATE TABLE IF NOT EXISTS tidak menambahkan kolom ke tabel yang sudah ada.
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS promo_id INTEGER REFERENCES promotions(id);
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS tier_id INTEGER REFERENCES price_tiers(id);
+
 CREATE TABLE IF NOT EXISTS sale_payments (
     id SERIAL PRIMARY KEY,
     sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
@@ -298,3 +380,11 @@ CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON purchase_items (purcha
 CREATE INDEX IF NOT EXISTS idx_member_point_logs_member ON member_point_logs (member_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_shifts_user_open ON shifts (user_id, closed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs (created_at);
+CREATE INDEX IF NOT EXISTS idx_product_barcodes_barcode ON product_barcodes (barcode);
+CREATE INDEX IF NOT EXISTS idx_product_barcodes_product ON product_barcodes (product_id);
+-- Selaras dengan predikat resolveTierPrice: product_id + unit_id + min_qty <= qty, urut harga.
+CREATE INDEX IF NOT EXISTS idx_price_tiers_lookup ON price_tiers (product_id, unit_id, min_qty);
+-- Selaras dengan findPromotionsForProducts/findActivePromotions.
+CREATE INDEX IF NOT EXISTS idx_promotions_active ON promotions (is_active);
+CREATE INDEX IF NOT EXISTS idx_promotions_product ON promotions (is_active, product_id, min_qty);
+CREATE INDEX IF NOT EXISTS idx_promotions_category ON promotions (is_active, category_id, min_qty);

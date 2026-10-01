@@ -3,7 +3,7 @@ import { useState } from 'react';
 import {
   LayoutDashboard, ShoppingCart, Receipt, Package, Tags, Truck, Boxes,
   ClipboardList, ShoppingBag, Users, Clock, BarChart3, UserCog, Settings,
-  LogOut, ChevronLeft, ChevronRight, Lock, Store,
+  LogOut, ChevronLeft, ChevronRight, Lock, Store, BadgePercent,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -22,6 +22,7 @@ const MENU = [
     section: 'Inventori',
     items: [
       { path: '/products', name: 'Produk', icon: Package, adminOnly: true },
+      { path: '/promotions', name: 'Promo', icon: BadgePercent, adminOnly: true },
       { path: '/categories', name: 'Kategori', icon: Tags, adminOnly: true },
       { path: '/suppliers', name: 'Supplier', icon: Truck, adminOnly: true },
       { path: '/stock', name: 'Stok', icon: Boxes, adminOnly: true },

@@ -35,6 +35,16 @@ const Products = () => {
   const [units, setUnits] = useState([]);
   const [unitForm, setUnitForm] = useState({ unit_name: '', conversion_factor: '', sell_price: '', member_price: '', barcode: '' });
 
+  const [barcodesProduct, setBarcodesProduct] = useState(null);
+  const [barcodes, setBarcodes] = useState([]);
+  const [barcodesUnits, setBarcodesUnits] = useState([]);
+  const [barcodeForm, setBarcodeForm] = useState({ barcode: '', unit_id: '' });
+
+  const [tiersProduct, setTiersProduct] = useState(null);
+  const [tiers, setTiers] = useState([]);
+  const [tiersUnits, setTiersUnits] = useState([]);
+  const [tierForm, setTierForm] = useState({ unit_id: '', min_qty: '', price: '' });
+
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [importResult, setImportResult] = useState(null);
@@ -158,6 +168,75 @@ const Products = () => {
     }
   };
 
+  const openBarcodes = async (product) => {
+    setBarcodesProduct(product);
+    setBarcodeForm({ barcode: '', unit_id: '' });
+    try {
+      setBarcodes(await api.get(`/api/products/${product.id}/barcodes`));
+      setBarcodesUnits(await api.get(`/api/products/${product.id}/units`));
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const addBarcode = async () => {
+    try {
+      await api.post(`/api/products/${barcodesProduct.id}/barcodes`, {
+        barcode: barcodeForm.barcode,
+        unit_id: barcodeForm.unit_id || null,
+      });
+      toast.success('Barcode ditambahkan');
+      setBarcodeForm({ barcode: '', unit_id: '' });
+      setBarcodes(await api.get(`/api/products/${barcodesProduct.id}/barcodes`));
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const deleteBarcode = async (barcodeId) => {
+    try {
+      await api.del(`/api/products/${barcodesProduct.id}/barcodes/${barcodeId}`);
+      setBarcodes(await api.get(`/api/products/${barcodesProduct.id}/barcodes`));
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const openTiers = async (product) => {
+    setTiersProduct(product);
+    setTierForm({ unit_id: '', min_qty: '', price: '' });
+    try {
+      setTiers(await api.get(`/api/products/${product.id}/tiers`));
+      setTiersUnits(await api.get(`/api/products/${product.id}/units`));
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const addTier = async () => {
+    try {
+      await api.post(`/api/products/${tiersProduct.id}/tiers`, {
+        unit_id: tierForm.unit_id || null,
+        min_qty: tierForm.min_qty,
+        price: tierForm.price,
+      });
+      toast.success('Tier disimpan');
+      setTierForm({ unit_id: '', min_qty: '', price: '' });
+      setTiers(await api.get(`/api/products/${tiersProduct.id}/tiers`));
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const deleteTier = async (tierId) => {
+    try {
+      await api.del(`/api/products/${tiersProduct.id}/tiers/${tierId}`);
+      setTiers(await api.get(`/api/products/${tiersProduct.id}/tiers`));
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
   const handleImport = async () => {
     try {
       const result = await api.post('/api/products/import', { csv: importText });
@@ -257,6 +336,8 @@ const Products = () => {
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => openUnits(product)} title="Satuan">Satuan</Button>
+                    <Button variant="ghost" size="sm" onClick={() => openBarcodes(product)} title="Barcode tambahan">Barcode</Button>
+                    <Button variant="ghost" size="sm" onClick={() => openTiers(product)} title="Harga partai">Tier</Button>
                     <Button variant="ghost" size="sm" onClick={() => openEdit(product)}><Pencil size={14} /></Button>
                     <Button variant="ghost" size="sm" onClick={() => setConfirm(product)}><Trash2 size={14} className="text-ios-red" /></Button>
                   </div>
@@ -328,6 +409,60 @@ const Products = () => {
             <Input label="Barcode" value={unitForm.barcode} onChange={(e) => setUnitForm({ ...unitForm, barcode: e.target.value })} />
           </div>
           <Button className="mt-3" onClick={addUnit}><Plus size={16} /> Tambah</Button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={Boolean(barcodesProduct)} onClose={() => setBarcodesProduct(null)} title={`Barcode Tambahan - ${barcodesProduct?.name || ''}`}>
+        <div className="space-y-2 mb-4">
+          {barcodes.length === 0 && <p className="text-sm text-slate-500">Belum ada barcode tambahan.</p>}
+          {barcodes.map((b) => (
+            <div key={b.id} className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-ios-sm">
+              <div>
+                <span className="text-white font-mono">{b.barcode}</span>
+                {b.unit_name && <span className="text-slate-400 text-xs ml-2">({b.unit_name})</span>}
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => deleteBarcode(b.id)}><Trash2 size={14} className="text-ios-red" /></Button>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-white/10 pt-4">
+          <p className="text-sm font-medium text-white mb-3">Tambah Barcode</p>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Barcode *" value={barcodeForm.barcode} onChange={(e) => setBarcodeForm({ ...barcodeForm, barcode: e.target.value })} />
+            <Input as="select" label="Satuan (opsional)" value={barcodeForm.unit_id} onChange={(e) => setBarcodeForm({ ...barcodeForm, unit_id: e.target.value })}>
+              <option value="">Satuan dasar</option>
+              {barcodesUnits.map((u) => <option key={u.id} value={u.id}>{u.unit_name}</option>)}
+            </Input>
+          </div>
+          <p className="text-xs text-slate-500 mt-2">Pilih satuan hanya bila barcode mewakili unit seperti dus/karton. Barcode harus unik di semua sumber.</p>
+          <Button className="mt-3" onClick={addBarcode} disabled={!barcodeForm.barcode}><Plus size={16} /> Tambah</Button>
+        </div>
+      </Modal>
+
+      <Modal isOpen={Boolean(tiersProduct)} onClose={() => setTiersProduct(null)} title={`Harga Partai Bertingkat - ${tiersProduct?.name || ''}`} size="lg">
+        <div className="space-y-2 mb-4">
+          {tiers.length === 0 && <p className="text-sm text-slate-500">Belum ada tier harga.</p>}
+          {tiers.map((t) => (
+            <div key={t.id} className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-ios-sm">
+              <div>
+                <span className="text-white">Min {t.min_qty} {t.unit_name || tiersProduct?.base_unit}</span>
+                <span className="text-ios-green ml-3">Rp {Number(t.price).toLocaleString('id-ID')}</span>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => deleteTier(t.id)}><Trash2 size={14} className="text-ios-red" /></Button>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-white/10 pt-4">
+          <p className="text-sm font-medium text-white mb-3">Tambah / Ubah Tier</p>
+          <div className="grid grid-cols-3 gap-3">
+            <Input label="Min Qty *" type="number" value={tierForm.min_qty} onChange={(e) => setTierForm({ ...tierForm, min_qty: e.target.value })} placeholder="mis. 12" />
+            <Input label="Harga per Unit (Rp) *" type="number" value={tierForm.price} onChange={(e) => setTierForm({ ...tierForm, price: e.target.value })} />
+            <Input as="select" label="Satuan" value={tierForm.unit_id} onChange={(e) => setTierForm({ ...tierForm, unit_id: e.target.value })}>
+              <option value="">{tiersProduct?.base_unit || 'Satuan dasar'}</option>
+              {tiersUnits.map((u) => <option key={u.id} value={u.id}>{u.unit_name}</option>)}
+            </Input>
+          </div>
+          <Button className="mt-3" onClick={addTier} disabled={!tierForm.min_qty || !tierForm.price}><Plus size={16} /> Simpan Tier</Button>
         </div>
       </Modal>
 

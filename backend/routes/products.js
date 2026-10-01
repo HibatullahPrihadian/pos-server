@@ -9,6 +9,7 @@ const { requireString, cleanString, toBool } = require('../utils/validate');
 const { parseCsv, sendCsv } = require('../utils/csv');
 const { imageUpload, uploadRoot, publicPath } = require('../utils/upload');
 const { logAudit } = require('../utils/audit');
+const { resolveItemsEffectivePricing } = require('../utils/item_pricing');
 
 const router = express.Router();
 
@@ -130,20 +131,44 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// Cari berdasarkan barcode produk atau barcode satuan.
+// Cari berdasarkan barcode: tabel multibarcode -> barcode produk -> barcode satuan.
 router.get('/barcode/:barcode', async (req, res, next) => {
   try {
     const barcode = String(req.params.barcode || '').trim();
     if (!barcode) throw new HttpError(400, 'Barcode wajib diisi');
 
-    const productResult = await pool.query(
-      `${SELECT_PRODUCT} WHERE p.barcode = $1 AND p.is_active = TRUE`,
-      [barcode]
-    );
-
-    let product = productResult.rows[0];
+    let product = null;
     let matchedUnit = null;
 
+    // 1) Barcode tambahan (product_barcodes). Bila unit_id terisi, satuan ikut dipakai.
+    const extraResult = await pool.query(
+      `SELECT pb.unit_id, pb.barcode, pb.product_id, pu.id AS unit_row_id, pu.product_id AS unit_product_id
+       FROM product_barcodes pb
+       LEFT JOIN product_units pu ON pu.id = pb.unit_id
+       WHERE pb.barcode = $1`,
+      [barcode]
+    );
+    if (extraResult.rows[0]) {
+      const extra = extraResult.rows[0];
+      const productId = extra.unit_id ? extra.unit_product_id : extra.product_id;
+      const p = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1 AND p.is_active = TRUE`, [productId]);
+      product = p.rows[0] || null;
+      if (product && extra.unit_id) {
+        const u = await pool.query('SELECT * FROM product_units WHERE id = $1', [extra.unit_id]);
+        matchedUnit = u.rows[0] || null;
+      }
+    }
+
+    // 2) Barcode utama produk.
+    if (!product) {
+      const productResult = await pool.query(
+        `${SELECT_PRODUCT} WHERE p.barcode = $1 AND p.is_active = TRUE`,
+        [barcode]
+      );
+      product = productResult.rows[0] || null;
+    }
+
+    // 3) Barcode satuan (kolom product_units.barcode).
     if (!product) {
       const unitResult = await pool.query(
         `SELECT pu.*, p.id AS product_id FROM product_units pu
@@ -166,6 +191,50 @@ router.get('/barcode/:barcode', async (req, res, next) => {
     );
 
     res.json({ product, units: units.rows, matched_unit: matchedUnit });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Pratinjau harga efektif (normal/member/tier/promo) untuk ditampilkan di POS.
+// Server tetap menghitung ulang saat checkout; endpoint ini hanya untuk tampilan.
+// Memakai resolver yang sama dengan checkout agar tidak terjadi penyimpangan harga.
+const MAX_QUOTE_ITEMS = 200;
+router.post('/quote', async (req, res, next) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (items.length > MAX_QUOTE_ITEMS) {
+      throw new HttpError(400, `item maksimal ${MAX_QUOTE_ITEMS}`);
+    }
+
+    // Validasi member di server (jangan percaya klien), sama seperti checkout.
+    let memberId = toInt(req.body?.member_id, 0) || null;
+    if (memberId) {
+      const member = await pool.query('SELECT id FROM members WHERE id = $1 AND is_active = TRUE', [memberId]);
+      if (!member.rows[0]) memberId = null;
+    }
+
+    const priced = await resolveItemsEffectivePricing(pool, {
+      items: items.map((raw) => ({
+        product_id: toInt(raw?.product_id, 0),
+        unit_id: toInt(raw?.unit_id, 0) || null,
+        qty: Math.max(1, Math.round(Number(raw?.qty) || 1)),
+      })),
+      isMember: Boolean(memberId),
+    });
+
+    const quote = priced
+      .filter((row) => row.product && !row.unitMissing)
+      .map((row) => ({
+        product_id: row.productId,
+        unit_id: row.unitId,
+        base_price: row.basePrice,
+        effective_price: row.effectivePrice,
+        promo_name: row.promoName,
+        tier_min_qty: row.tierMinQty,
+      }));
+
+    res.json(quote);
   } catch (err) {
     next(err);
   }
@@ -466,6 +535,185 @@ router.delete('/:id/units/:unitId', requireRole('admin'), async (req, res, next)
     );
     if (!result.rows[0]) throw new HttpError(404, 'Satuan tidak ditemukan');
     res.json({ message: 'Satuan dihapus' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================
+// Barcode tambahan (multibarcode)
+// =========================================================
+// Pastikan produk ada (dan aktif). Dipakai sebelum operasi nested barcode/tier
+// agar tidak bergantung pada error FK (yang muncul sebagai 500).
+const assertProductExists = async (productId) => {
+  const id = toInt(productId, 0);
+  if (id <= 0) throw new HttpError(400, 'Produk tidak valid');
+  const result = await pool.query('SELECT id, is_active FROM products WHERE id = $1', [id]);
+  if (!result.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
+  if (!result.rows[0].is_active) throw new HttpError(400, 'Produk tidak aktif');
+  return result.rows[0];
+};
+
+// Pastikan barcode unik lintas ketiga sumber: products.barcode, product_units.barcode,
+// product_barcodes.barcode (di luar baris `exceptBarcodeId` yang sedang diubah).
+const assertBarcodeAvailable = async (barcode, { exceptBarcodeId = null } = {}) => {
+  const conflict = await pool.query(
+    `SELECT 'product' AS source FROM products WHERE barcode = $1
+     UNION ALL
+     SELECT 'unit' AS source FROM product_units WHERE barcode = $1
+     UNION ALL
+     SELECT 'extra' AS source FROM product_barcodes WHERE barcode = $1 AND id <> $2
+     LIMIT 1`,
+    [barcode, exceptBarcodeId || 0]
+  );
+  if (conflict.rows[0]) {
+    throw new HttpError(409, `Barcode ${barcode} sudah dipakai (sumber: ${conflict.rows[0].source})`);
+  }
+};
+
+router.get('/:id/barcodes', async (req, res, next) => {
+  try {
+    await assertProductExists(req.params.id);
+    const result = await pool.query(
+      `SELECT pb.id, pb.barcode, pb.unit_id, pu.unit_name, pb.created_at
+       FROM product_barcodes pb
+       LEFT JOIN product_units pu ON pu.id = pb.unit_id
+       WHERE pb.product_id = $1
+       ORDER BY pb.id`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/barcodes', requireRole('admin'), async (req, res, next) => {
+  try {
+    const barcode = cleanString(req.body?.barcode, 50);
+    if (!barcode) throw new HttpError(400, 'Barcode wajib diisi');
+
+    const productId = toInt(req.params.id, 0);
+    if (productId <= 0) throw new HttpError(400, 'Produk tidak valid');
+    await assertProductExists(productId);
+
+    let unitId = toInt(req.body?.unit_id, 0) || null;
+    if (unitId) {
+      const unit = await pool.query(
+        'SELECT id FROM product_units WHERE id = $1 AND product_id = $2',
+        [unitId, productId]
+      );
+      if (!unit.rows[0]) throw new HttpError(400, 'Satuan tidak sesuai dengan produk');
+    }
+
+    await assertBarcodeAvailable(barcode);
+
+    const result = await pool.query(
+      `INSERT INTO product_barcodes (product_id, barcode, unit_id)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [productId, barcode, unitId]
+    );
+
+    await logAudit(pool, {
+      userId: req.user.id, action: 'create', entity: 'product_barcodes', entityId: result.rows[0].id,
+      detail: { product_id: productId, barcode },
+    });
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id/barcodes/:barcodeId', requireRole('admin'), async (req, res, next) => {
+  try {
+    await assertProductExists(req.params.id);
+    const result = await pool.query(
+      'DELETE FROM product_barcodes WHERE id = $1 AND product_id = $2 RETURNING id',
+      [req.params.barcodeId, req.params.id]
+    );
+    if (!result.rows[0]) throw new HttpError(404, 'Barcode tidak ditemukan');
+    await logAudit(pool, {
+      userId: req.user.id, action: 'delete', entity: 'product_barcodes', entityId: Number(req.params.barcodeId),
+    });
+    res.json({ message: 'Barcode dihapus' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================
+// Harga partai bertingkat (price_tiers)
+// =========================================================
+router.get('/:id/tiers', async (req, res, next) => {
+  try {
+    await assertProductExists(req.params.id);
+    const result = await pool.query(
+      `SELECT pt.id, pt.unit_id, pu.unit_name, pt.min_qty, pt.price, pt.created_at
+       FROM price_tiers pt
+       LEFT JOIN product_units pu ON pu.id = pt.unit_id
+       WHERE pt.product_id = $1
+       ORDER BY pt.unit_id NULLS FIRST, pt.min_qty`,
+      [req.params.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.post('/:id/tiers', requireRole('admin'), async (req, res, next) => {
+  try {
+    const productId = toInt(req.params.id, 0);
+    if (productId <= 0) throw new HttpError(400, 'Produk tidak valid');
+    await assertProductExists(productId);
+
+    const minQty = Math.round(Number(req.body?.min_qty));
+    if (!Number.isFinite(minQty) || minQty <= 1) {
+      throw new HttpError(400, 'min_qty harus lebih dari 1');
+    }
+
+    const price = normalizeMoney(req.body?.price);
+    if (price === null || price < 0) throw new HttpError(400, 'Harga tier tidak valid');
+
+    let unitId = toInt(req.body?.unit_id, 0) || null;
+    if (unitId) {
+      const unit = await pool.query(
+        'SELECT id FROM product_units WHERE id = $1 AND product_id = $2',
+        [unitId, productId]
+      );
+      if (!unit.rows[0]) throw new HttpError(400, 'Satuan tidak sesuai dengan produk');
+    }
+
+    const result = await pool.query(
+      `INSERT INTO price_tiers (product_id, unit_id, min_qty, price)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (product_id, unit_id, min_qty) DO UPDATE SET price = EXCLUDED.price
+       RETURNING *`,
+      [productId, unitId, minQty, price]
+    );
+
+    await logAudit(pool, {
+      userId: req.user.id, action: 'upsert', entity: 'price_tiers', entityId: result.rows[0].id,
+      detail: { product_id: productId, unit_id: unitId, min_qty: minQty, price },
+    });
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.delete('/:id/tiers/:tierId', requireRole('admin'), async (req, res, next) => {
+  try {
+    await assertProductExists(req.params.id);
+    const result = await pool.query(
+      'DELETE FROM price_tiers WHERE id = $1 AND product_id = $2 RETURNING id',
+      [req.params.tierId, req.params.id]
+    );
+    if (!result.rows[0]) throw new HttpError(404, 'Tier tidak ditemukan');
+    await logAudit(pool, {
+      userId: req.user.id, action: 'delete', entity: 'price_tiers', entityId: Number(req.params.tierId),
+    });
+    res.json({ message: 'Tier dihapus' });
   } catch (err) {
     next(err);
   }

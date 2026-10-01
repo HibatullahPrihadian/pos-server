@@ -49,6 +49,25 @@ const CartProvider = ({ children }) => {
     setItems((prev) => prev.map((i) => (keyOf(i) === key ? { ...i, discount: Math.max(0, discount) } : i)));
   }, []);
 
+  // Perbarui harga satuan + info promo/tier berdasarkan hasil kalkulasi server.
+  // Server tetap penentu akhir saat checkout; ini hanya sinkronisasi tampilan.
+  const applyQuotes = useCallback((quotes) => {
+    if (!Array.isArray(quotes) || quotes.length === 0) return;
+    const map = new Map(quotes.map((q) => [`${q.product_id}:${q.unit_id || 'base'}`, q]));
+    setItems((prev) =>
+      prev.map((i) => {
+        const q = map.get(keyOf(i));
+        if (!q || !Number.isFinite(Number(q.effective_price))) return i;
+        return {
+          ...i,
+          price: Number(q.effective_price),
+          promo_name: q.promo_name || null,
+          tier_min_qty: q.tier_min_qty || null,
+        };
+      })
+    );
+  }, []);
+
   const removeItem = useCallback((productId, unitId) => {
     const key = `${productId}:${unitId || 'base'}`;
     setItems((prev) => prev.filter((i) => keyOf(i) !== key));
@@ -80,6 +99,7 @@ const CartProvider = ({ children }) => {
     addItem,
     updateQty,
     updateDiscount,
+    applyQuotes,
     removeItem,
     clear,
     totals,

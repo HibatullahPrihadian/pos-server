@@ -51,6 +51,7 @@ app.use('/api/settings', require('./routes/settings'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/suppliers', require('./routes/suppliers'));
 app.use('/api/products', require('./routes/products'));
+app.use('/api/promotions', require('./routes/promotions'));
 app.use('/api/members', require('./routes/members'));
 app.use('/api/stock', require('./routes/stock'));
 app.use('/api/purchases', require('./routes/purchases'));
@@ -62,9 +63,44 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api', notFoundHandler);
 app.use(errorHandler);
 
+// Pastikan migrasi fitur (multibarcode/tier/promo) sudah diterapkan. Checkout
+// bergantung pada kolom/tabel ini; gagal cepat dengan pesan jelas lebih baik
+// daripada error runtime per-transaksi.
+const assertFeatureSchema = async () => {
+  const required = [
+    { name: 'tabel product_barcodes', sql: "SELECT to_regclass('public.product_barcodes') AS ok" },
+    { name: 'tabel price_tiers', sql: "SELECT to_regclass('public.price_tiers') AS ok" },
+    { name: 'tabel promotions', sql: "SELECT to_regclass('public.promotions') AS ok" },
+    {
+      name: 'kolom sale_items.promo_id/tier_id',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'sale_items' AND column_name IN ('promo_id', 'tier_id')`,
+    },
+  ];
+
+  for (const check of required) {
+    const result = await pool.query(check.sql);
+    const row = result.rows[0];
+    const ok = check.name.startsWith('kolom') ? row.ok === 2 : Boolean(row.ok);
+    if (!ok) {
+      throw new Error(
+        `Skema fitur belum diterapkan (${check.name}). Jalankan migrasi: backend/init.sql ` +
+          `(mis. docker compose exec -T postgres psql -U postgres -d pos_minimarket -f /docker-entrypoint-initdb.d/01-init.sql)`
+      );
+    }
+  }
+};
+
 // Akun awal disiapkan sebelum server menerima request, agar login deterministik
 // pada start pertama.
 const start = async () => {
+  try {
+    await assertFeatureSchema();
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+
   try {
     await require('./utils/bootstrap').ensureInitialUsers();
   } catch (err) {

@@ -8,7 +8,7 @@ const { cleanString, isValidDate } = require('../utils/validate');
 const { nextDocNumber } = require('../utils/invoice');
 const { applyStockMovement } = require('../utils/stock');
 const { extractTax, pointsEarned } = require('../utils/money');
-const { resolveUnit, resolvePrice } = require('../utils/pricing');
+const { resolveItemsEffectivePricing } = require('../utils/item_pricing');
 const { getSettings } = require('../utils/settings');
 const { logAudit } = require('../utils/audit');
 
@@ -17,6 +17,10 @@ const router = express.Router();
 router.use(verifyJwt);
 
 const PAYMENT_METHODS = new Set(['cash', 'qris', 'debit', 'transfer']);
+
+// Batas jumlah per baris item agar perhitungan uang tetap aman (Number -> BIGINT)
+// dan mencegah penyalahgunaan nilai qty yang sangat besar.
+const MAX_LINE_QTY = 100000;
 
 const SALE_SELECT = `
   SELECT s.*, u.full_name AS cashier_name, m.name AS member_name, m.code AS member_code,
@@ -81,25 +85,45 @@ router.post('/', async (req, res, next) => {
       let subtotal = 0;
       let itemDiscountTotal = 0;
 
-      for (const raw of body.items) {
+      // Validasi awal + kunci baris produk (FOR UPDATE) satu kali per item,
+      // mempertahankan pola lama untuk konsistensi stok.
+      const normalizedItems = body.items.map((raw) => {
         const productId = toInt(raw?.product_id, 0);
         if (productId <= 0) throw new HttpError(400, 'product_id tidak valid');
-
         const qty = Math.round(Number(raw?.qty));
         if (!Number.isFinite(qty) || qty <= 0) throw new HttpError(400, 'qty harus bilangan bulat positif');
-
+        if (qty > MAX_LINE_QTY) throw new HttpError(400, `qty melebihi batas ${MAX_LINE_QTY}`);
         const unitId = toInt(raw?.unit_id, 0) || null;
+        return { raw, productId, qty, unitId };
+      });
 
-        const productResult = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [productId]);
+      const lockedProducts = new Map();
+      for (const item of normalizedItems) {
+        if (lockedProducts.has(item.productId)) continue;
+        const productResult = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [item.productId]);
         const product = productResult.rows[0];
-        if (!product) throw new HttpError(404, `Produk #${productId} tidak ditemukan`);
+        if (!product) throw new HttpError(404, `Produk #${item.productId} tidak ditemukan`);
         if (!product.is_active) throw new HttpError(400, `Produk ${product.name} tidak aktif`);
+        lockedProducts.set(item.productId, product);
+      }
 
-        const resolved = await resolveUnit(client, { productId, unitId });
-        if (!resolved) throw new HttpError(400, 'Satuan produk tidak ditemukan');
+      // Resolusi harga efektif (normal/member/tier/promo) dalam query tetap, bukan N+1.
+      const priced = await resolveItemsEffectivePricing(client, {
+        items: normalizedItems.map((i) => ({ product_id: i.productId, unit_id: i.unitId, qty: i.qty })),
+        isMember,
+      });
 
-        const unitPrice = resolvePrice(product, resolved.unit, isMember);
-        const baseQty = qty * resolved.conversionFactor;
+      for (let idx = 0; idx < normalizedItems.length; idx += 1) {
+        const { raw, productId, qty, unitId } = normalizedItems[idx];
+        const priced_line = priced[idx];
+        const product = lockedProducts.get(productId);
+        if (!priced_line || priced_line.unitMissing) {
+          throw new HttpError(400, 'Satuan produk tidak ditemukan');
+        }
+
+        const unitPrice = priced_line.effectivePrice;
+        const conversionFactor = priced_line.conversionFactor || 1;
+        const baseQty = qty * conversionFactor;
 
         const grossLine = unitPrice * qty;
         const lineDiscount = Math.max(0, Math.round(Number(raw?.discount) || 0));
@@ -113,15 +137,17 @@ router.post('/', async (req, res, next) => {
         lines.push({
           product,
           unitId,
-          unitName: resolved.unit ? resolved.unit.unit_name : product.base_unit,
+          unitName: priced_line.unitName,
           qty,
           baseQty,
           unitPrice,
           discount: lineDiscount,
           lineTotal: grossLine - lineDiscount,
+          promoId: priced_line.promoId,
+          tierId: priced_line.tierId,
           // HPP per satuan jual (bukan per satuan dasar) agar laporan laba kotor
           // yang memakai cost_price * qty tetap benar untuk penjualan multi-satuan.
-          costPrice: Math.round(Number(product.cost_price) * resolved.conversionFactor),
+          costPrice: Math.round(Number(product.cost_price) * conversionFactor),
           // HPP per satuan dasar, dipakai untuk kartu stok (qty dalam satuan dasar).
           baseCostPrice: Number(product.cost_price),
         });
@@ -203,11 +229,11 @@ router.post('/', async (req, res, next) => {
       for (const line of lines) {
         await client.query(
           `INSERT INTO sale_items
-            (sale_id, product_id, unit_id, unit_name, qty, base_qty, unit_price, discount, cost_price, line_total)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            (sale_id, product_id, unit_id, unit_name, qty, base_qty, unit_price, discount, cost_price, line_total, promo_id, tier_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
           [
             sale.id, line.product.id, line.unitId, line.unitName, line.qty, line.baseQty,
-            line.unitPrice, line.discount, line.costPrice, line.lineTotal,
+            line.unitPrice, line.discount, line.costPrice, line.lineTotal, line.promoId, line.tierId,
           ]
         );
 
