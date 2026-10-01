@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  TrendingUp, Receipt, PiggyBank, AlertTriangle, Clock, ShoppingBag, ArrowRight,
+  TrendingUp, Receipt, PiggyBank, AlertTriangle, Clock, ShoppingBag, ArrowRight, CalendarClock,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
@@ -9,7 +9,7 @@ import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Spinner from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
-import { formatCurrency } from '../utils/formatters';
+import { formatCurrency, formatDate } from '../utils/formatters';
 
 const KPI = ({ icon: Icon, label, value, sub, tone = 'blue' }) => {
   const tones = {
@@ -17,6 +17,7 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue' }) => {
     green: 'bg-ios-green/15 border-ios-green/30 text-ios-green',
     purple: 'bg-ios-purple/15 border-ios-purple/30 text-ios-purple',
     orange: 'bg-ios-orange/15 border-ios-orange/30 text-ios-orange',
+    red: 'bg-ios-red/15 border-ios-red/30 text-ios-red',
   };
 
   return (
@@ -38,12 +39,18 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue' }) => {
 const Dashboard = () => {
   const toast = useToastContext();
   const [data, setData] = useState(null);
+  const [expiring, setExpiring] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .get('/api/reports/dashboard')
-      .then(setData)
+    Promise.all([
+      api.get('/api/reports/dashboard'),
+      api.get('/api/stock/expiring').catch(() => null),
+    ])
+      .then(([dash, exp]) => {
+        setData(dash);
+        setExpiring(exp);
+      })
       .catch((err) => toast.error(err.message))
       .finally(() => setLoading(false));
   }, [toast]);
@@ -86,6 +93,20 @@ const Dashboard = () => {
           sub="produk perlu restock"
           tone="orange"
         />
+        <KPI
+          icon={CalendarClock}
+          label="Akan Kadaluarsa"
+          value={expiring?.expiring?.length ?? 0}
+          sub={`≤ ${expiring?.warning_days ?? 180} hari`}
+          tone="orange"
+        />
+        <KPI
+          icon={AlertTriangle}
+          label="Sudah Kadaluarsa"
+          value={expiring?.expired?.length ?? 0}
+          sub="batch perlu dibuang"
+          tone="red"
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -121,6 +142,27 @@ const Dashboard = () => {
                       {product.product_name}
                     </span>
                     <Badge tone="blue">{product.qty_sold}</Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          <Card title="Batch Akan/ Sudah Kadaluarsa">
+            {(!expiring || (expiring.expiring.length === 0 && expiring.expired.length === 0)) ? (
+              <p className="text-sm text-slate-500">Tidak ada batch mendekati kadaluarsa</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {[...expiring.expired, ...expiring.expiring].slice(0, 8).map((batch) => (
+                  <div key={batch.id} className="flex items-center justify-between text-sm gap-2">
+                    <span className="text-slate-300 truncate">
+                      {batch.product_name}
+                      {batch.batch_code ? <span className="text-slate-500"> · {batch.batch_code}</span> : null}
+                    </span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-slate-500">{formatDate(batch.expiry_date)}</span>
+                      <Badge tone={batch.is_expired ? 'red' : 'orange'}>{batch.qty_remaining}</Badge>
+                    </span>
                   </div>
                 ))}
               </div>

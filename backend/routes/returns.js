@@ -7,6 +7,7 @@ const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
 const { nextDocNumber } = require('../utils/invoice');
 const { applyStockMovement } = require('../utils/stock');
+const { restoreSaleItemBatches } = require('../utils/batches');
 const { logAudit } = require('../utils/audit');
 
 const router = express.Router();
@@ -164,6 +165,9 @@ router.post('/', async (req, res, next) => {
           'UPDATE sale_items SET returned_qty = returned_qty + $1 WHERE id = $2',
           [entry.qty, entry.item.id]
         );
+
+        // Kembalikan stok retur ke batch asal (FEFO trace, fallback legacy).
+        await restoreSaleItemBatches(client, entry.item, entry.qty);
 
         // Baris paket: kembalikan stok tiap komponen sesuai qty paket (HPP asli komponen).
         if (entry.item.bundle_id) {

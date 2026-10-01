@@ -32,6 +32,7 @@ const Settings = () => {
         point_min_redeem: settings.point_min_redeem,
         low_stock_default: settings.low_stock_default,
         allow_negative_stock: settings.allow_negative_stock,
+        expiry_warning_days: settings.expiry_warning_days ?? 180,
       });
     }
   }, [settings]);
@@ -105,6 +106,13 @@ const Settings = () => {
             <Input label="Nilai 1 Poin (rupiah saat tukar)" type="number" value={form.point_value_rupiah} onChange={(e) => setForm({ ...form, point_value_rupiah: e.target.value })} />
             <Input label="Minimal Poin untuk Tukar" type="number" value={form.point_min_redeem} onChange={(e) => setForm({ ...form, point_min_redeem: e.target.value })} />
             <Input label="Stok Minimum Default" type="number" value={form.low_stock_default} onChange={(e) => setForm({ ...form, low_stock_default: e.target.value })} />
+            <Input
+              label="Ambang Peringatan Kadaluarsa (hari)"
+              type="number"
+              value={form.expiry_warning_days}
+              onChange={(e) => setForm({ ...form, expiry_warning_days: e.target.value })}
+            />
+            <p className="text-xs text-slate-500 -mt-2">Batch dengan kadaluarsa ≤ ambang ini muncul di dashboard (default 180 hari).</p>
             <Input as="select" label="Izinkan Stok Negatif" value={form.allow_negative_stock ? '1' : '0'} onChange={(e) => setForm({ ...form, allow_negative_stock: e.target.value === '1' })}>
               <option value="0">Tidak (disarankan)</option>
               <option value="1">Ya</option>

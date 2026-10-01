@@ -7,6 +7,7 @@ const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
 const { nextDocNumber } = require('../utils/invoice');
 const { applyStockMovement } = require('../utils/stock');
+const { allocateFefo, recordSaleItemBatch, recordShortfall, restoreSaleItemBatches } = require('../utils/batches');
 const { extractTax, pointsEarned } = require('../utils/money');
 const { resolveItemsEffectivePricing } = require('../utils/item_pricing');
 const { getSettings } = require('../utils/settings');
@@ -290,17 +291,46 @@ router.post('/', async (req, res, next) => {
       );
       const sale = saleResult.rows[0];
 
-      // Simpan item + kurangi stok.
+      // Simpan item + kurangi stok (FEFO per batch).
       for (const line of lines) {
-        await client.query(
+        const itemResult = await client.query(
           `INSERT INTO sale_items
             (sale_id, product_id, unit_id, unit_name, qty, base_qty, unit_price, discount, cost_price, line_total, promo_id, tier_id)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
           [
             sale.id, line.product.id, line.unitId, line.unitName, line.qty, line.baseQty,
             line.unitPrice, line.discount, line.costPrice, line.lineTotal, line.promoId, line.tierId,
           ]
         );
+        const saleItemId = itemResult.rows[0].id;
+
+        // Alokasi batch FEFO (blokir batch kadaluarsa). Bila stok agregat tidak
+        // cukup namun allow_negative_stock aktif, sisa dicatat sebagai shortfall
+        // agar invariant SUM(qty_remaining) == stock_qty tetap terjaga.
+        const allocations = await allocateFefo(client, {
+          productId: line.product.id,
+          qtyBase: line.baseQty,
+          allowShortfall: allowNegativeStock,
+          productName: line.product.name,
+        });
+        let allocatedQty = 0;
+        for (const alloc of allocations) {
+          await recordSaleItemBatch(client, {
+            saleItemId,
+            batchId: alloc.batchId,
+            qty: alloc.qty,
+            costPrice: alloc.costPrice,
+          });
+          allocatedQty += alloc.qty;
+        }
+        if (allocatedQty < line.baseQty) {
+          await recordShortfall(client, {
+            productId: line.product.id,
+            qtyShortfall: line.baseQty - allocatedQty,
+            unitCost: line.baseCostPrice,
+            note: `Stok minus penjualan ${invoiceNo}`,
+          });
+        }
 
         await applyStockMovement(client, {
           productId: line.product.id,
@@ -318,15 +348,16 @@ router.post('/', async (req, res, next) => {
       // Simpan baris paket (product_id NULL, bundle_id terisi) dan kurangi stok
       // tiap komponen. Paket tidak masuk tier/promo item (harga tetap admin).
       for (const line of bundleLines) {
-        await client.query(
+        const bundleItemResult = await client.query(
           `INSERT INTO sale_items
             (sale_id, product_id, bundle_id, unit_name, qty, base_qty, unit_price, discount, cost_price, line_total)
-           VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9)`,
+           VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
           [
             sale.id, line.bundle.id, line.bundle.sku || 'PAKET', line.qty, line.qty,
             line.unitPrice, line.lineDiscount, line.costPrice, line.lineTotal,
           ]
         );
+        const bundleSaleItemId = bundleItemResult.rows[0].id;
 
         // Mutasi stok per komponen; qty dasar = qty komponen (integer) * qty paket.
         const movements = new Map();
@@ -336,9 +367,35 @@ router.post('/', async (req, res, next) => {
           movements.set(component.productId, {
             baseQty: (existing?.baseQty || 0) + baseQty,
             baseCostPrice: component.baseCostPrice,
+            name: component.name,
           });
         }
         for (const [productId, mv] of movements) {
+          const allocations = await allocateFefo(client, {
+            productId,
+            qtyBase: mv.baseQty,
+            allowShortfall: allowNegativeStock,
+            productName: mv.name,
+          });
+          let allocatedQty = 0;
+          for (const alloc of allocations) {
+            await recordSaleItemBatch(client, {
+              saleItemId: bundleSaleItemId,
+              batchId: alloc.batchId,
+              qty: alloc.qty,
+              costPrice: alloc.costPrice,
+            });
+            allocatedQty += alloc.qty;
+          }
+          if (allocatedQty < mv.baseQty) {
+            await recordShortfall(client, {
+              productId,
+              qtyShortfall: mv.baseQty - allocatedQty,
+              unitCost: mv.baseCostPrice,
+              note: `Stok minus penjualan ${invoiceNo} (paket ${line.bundle.name})`,
+            });
+          }
+
           await applyStockMovement(client, {
             productId,
             qtyChange: -mv.baseQty,
@@ -551,6 +608,10 @@ router.post('/:id/void', async (req, res, next) => {
         // bertambah dua kali (retur sudah menambah stok).
         const unreturnedQty = item.qty - item.returned_qty;
         if (unreturnedQty <= 0) continue;
+
+        // Kembalikan ke batch asal memakai jejak sale_item_batches (proporsional
+        // terhadap qty yang belum diretur). Fallback ke batch legacy untuk data lama.
+        await restoreSaleItemBatches(client, item, unreturnedQty);
 
         // Baris paket: kembalikan stok tiap komponen sesuai qty paket.
         if (item.bundle_id) {

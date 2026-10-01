@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Search, ArrowLeftRight, TrendingDown, BookOpen } from 'lucide-react';
+import { Search, ArrowLeftRight, TrendingDown, BookOpen, CalendarClock, Pencil } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
 import PageHeader from '../components/ui/PageHeader';
@@ -11,11 +11,12 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import useDebounce from '../hooks/useDebounce';
-import { formatDateTime, todayIso, firstOfMonthIso } from '../utils/formatters';
+import { formatDateTime, formatDate, todayIso, firstOfMonthIso } from '../utils/formatters';
 import { STOCK_TYPE_LABELS } from '../utils/labels';
 
 const TABS = [
   { key: 'movements', label: 'Kartu Stok', icon: BookOpen },
+  { key: 'batches', label: 'Batch & Kadaluarsa', icon: CalendarClock },
   { key: 'low', label: 'Stok Minimum', icon: TrendingDown },
   { key: 'adjust', label: 'Penyesuaian', icon: ArrowLeftRight },
 ];
@@ -35,7 +36,13 @@ const Stock = () => {
   const [lowStock, setLowStock] = useState([]);
 
   const [adjustOpen, setAdjustOpen] = useState(false);
-  const [adjustForm, setAdjustForm] = useState({ product_id: '', qty_change: '', note: '' });
+  const [adjustForm, setAdjustForm] = useState({ product_id: '', qty_change: '', note: '', expiry_date: '' });
+
+  const [batches, setBatches] = useState({ data: [], pagination: null });
+  const [batchProductFilter, setBatchProductFilter] = useState('');
+  const [batchExpiring, setBatchExpiring] = useState('');
+  const [editBatch, setEditBatch] = useState(null);
+  const [editBatchForm, setEditBatchForm] = useState({ expiry_date: '', batch_code: '' });
 
   const debouncedSearch = useDebounce(productSearch, 350);
 
@@ -69,10 +76,30 @@ const Stock = () => {
     }
   }, [toast]);
 
+  const loadBatches = useCallback(async () => {
+    setLoading(true);
+    try {
+      setBatches(
+        await api.get('/api/stock/batches', {
+          page,
+          limit: 50,
+          product_id: batchProductFilter,
+          expiring_within_days: batchExpiring,
+          include_expired: 'true',
+        })
+      );
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [page, batchProductFilter, batchExpiring, toast]);
+
   useEffect(() => {
     if (tab === 'movements') loadMovements();
     if (tab === 'low') loadLow();
-  }, [tab, loadMovements, loadLow]);
+    if (tab === 'batches') loadBatches();
+  }, [tab, loadMovements, loadLow, loadBatches]);
 
   useEffect(() => {
     api
@@ -86,9 +113,21 @@ const Stock = () => {
       const result = await api.post('/api/stock/adjustments', adjustForm);
       toast.success(`Stok disesuaikan. Saldo baru: ${result.balance_after}`);
       setAdjustOpen(false);
-      setAdjustForm({ product_id: '', qty_change: '', note: '' });
+      setAdjustForm({ product_id: '', qty_change: '', note: '', expiry_date: '' });
       if (tab === 'movements') loadMovements();
       if (tab === 'low') loadLow();
+      if (tab === 'batches') loadBatches();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const submitEditBatch = async () => {
+    try {
+      await api.put(`/api/stock/batches/${editBatch.id}`, editBatchForm);
+      toast.success('Batch diperbarui');
+      setEditBatch(null);
+      loadBatches();
     } catch (err) {
       toast.error(err.message);
     }
@@ -109,6 +148,16 @@ const Stock = () => {
     { key: 'category', label: 'Kategori' },
     { key: 'stock', label: 'Stok', align: 'right' },
     { key: 'min', label: 'Minimum', align: 'right' },
+    { key: 'action', label: '', align: 'right' },
+  ];
+
+  const batchColumns = [
+    { key: 'sku', label: 'SKU' },
+    { key: 'name', label: 'Produk' },
+    { key: 'batch', label: 'Batch' },
+    { key: 'expiry', label: 'Kadaluarsa' },
+    { key: 'qty', label: 'Sisa', align: 'right' },
+    { key: 'status', label: 'Status', align: 'center' },
     { key: 'action', label: '', align: 'right' },
   ];
 
@@ -209,7 +258,7 @@ const Stock = () => {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => { setAdjustForm({ product_id: row.id, qty_change: '', note: '' }); setAdjustOpen(true); }}
+                      onClick={() => { setAdjustForm({ product_id: row.id, qty_change: '', note: '', expiry_date: '' }); setAdjustOpen(true); }}
                     >
                       Sesuaikan
                     </Button>
@@ -221,11 +270,70 @@ const Stock = () => {
         </Card>
       )}
 
+      {tab === 'batches' && (
+        <Card padded={false}>
+          <div className="p-4 flex flex-wrap gap-3 border-b border-white/10">
+            <select
+              className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white focus:outline-none focus:border-ios-blue/60"
+              value={batchProductFilter}
+              onChange={(e) => { setBatchProductFilter(e.target.value); setPage(1); }}
+            >
+              <option value="">Semua Produk</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <select
+              className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white focus:outline-none focus:border-ios-blue/60"
+              value={batchExpiring}
+              onChange={(e) => { setBatchExpiring(e.target.value); setPage(1); }}
+            >
+              <option value="">Semua Batch</option>
+              <option value="30">Kadaluarsa ≤ 30 hari</option>
+              <option value="90">Kadaluarsa ≤ 90 hari</option>
+              <option value="180">Kadaluarsa ≤ 180 hari</option>
+            </select>
+          </div>
+          <div className="p-4">
+            <Table columns={batchColumns} loading={loading} empty="Belum ada batch">
+              {batches.data.map((row) => (
+                <tr key={row.id} className="hover:bg-white/5">
+                  <td className="px-4 py-3 font-mono text-xs text-slate-400">{row.sku}</td>
+                  <td className="px-4 py-3 text-white">{row.product_name}</td>
+                  <td className="px-4 py-3 text-slate-300">{row.batch_code || '-'}</td>
+                  <td className="px-4 py-3 text-slate-300">
+                    {row.expiry_date ? formatDate(row.expiry_date) : <span className="text-slate-500">Tanpa kadaluarsa</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right text-white">{row.qty_remaining}</td>
+                  <td className="px-4 py-3 text-center">
+                    {row.is_expired
+                      ? <Badge tone="red">Kadaluarsa</Badge>
+                      : row.is_expiring
+                        ? <Badge tone="orange">Segera</Badge>
+                        : <Badge tone="neutral">Aman</Badge>}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => { setEditBatch(row); setEditBatchForm({ expiry_date: row.expiry_date || '', batch_code: row.batch_code || '' }); }}
+                    >
+                      <Pencil size={14} /> Edit
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </Table>
+            <Pagination pagination={batches.pagination} onChange={setPage} />
+          </div>
+        </Card>
+      )}
+
       {tab === 'adjust' && (
         <Card title="Penyesuaian Stok Manual">
           <p className="text-sm text-slate-400 mb-4">
             Gunakan tombol <strong>Penyesuaian</strong> di kanan atas untuk mencatat barang rusak, hilang, atau koreksi stok.
-            Setiap penyesuaian tercatat di kartu stok.
+            Setiap penyesuaian tercatat di kartu stok. Untuk penambahan, tanggal kadaluarsa batch opsional dapat diisi.
           </p>
           <Button onClick={() => setAdjustOpen(true)}><ArrowLeftRight size={16} /> Buat Penyesuaian</Button>
         </Card>
@@ -255,7 +363,45 @@ const Stock = () => {
             value={adjustForm.qty_change}
             onChange={(e) => setAdjustForm({ ...adjustForm, qty_change: e.target.value })}
           />
+          {Number(adjustForm.qty_change) > 0 && (
+            <Input
+              label="Tanggal Kadaluarsa Batch (opsional)"
+              type="date"
+              value={adjustForm.expiry_date}
+              onChange={(e) => setAdjustForm({ ...adjustForm, expiry_date: e.target.value })}
+            />
+          )}
           <Input label="Catatan" value={adjustForm.note} onChange={(e) => setAdjustForm({ ...adjustForm, note: e.target.value })} placeholder="Barang rusak" />
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(editBatch)}
+        onClose={() => setEditBatch(null)}
+        title="Koreksi Batch"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="neutral" onClick={() => setEditBatch(null)}>Batal</Button>
+            <Button onClick={submitEditBatch}>Simpan</Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-400">
+            {editBatch?.product_name} — sisa {editBatch?.qty_remaining} {editBatch?.base_unit}
+          </p>
+          <Input
+            label="Tanggal Kadaluarsa (kosongkan bila tanpa kadaluarsa)"
+            type="date"
+            value={editBatchForm.expiry_date}
+            onChange={(e) => setEditBatchForm({ ...editBatchForm, expiry_date: e.target.value })}
+          />
+          <Input
+            label="Kode Batch"
+            value={editBatchForm.batch_code}
+            onChange={(e) => setEditBatchForm({ ...editBatchForm, batch_code: e.target.value })}
+            placeholder="Opsional"
+          />
         </div>
       </Modal>
     </div>

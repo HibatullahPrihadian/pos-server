@@ -24,6 +24,7 @@ const INT_FIELDS = [
   'point_value_rupiah',
   'point_min_redeem',
   'low_stock_default',
+  'expiry_warning_days',
 ];
 
 router.get('/', async (_req, res, next) => {

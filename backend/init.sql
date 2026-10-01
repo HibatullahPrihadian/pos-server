@@ -465,6 +465,67 @@ CREATE TABLE IF NOT EXISTS attendance (
 );
 
 -- =========================================================
+-- P3: Pelacakan kadaluarsa per-batch (FEFO)
+-- =========================================================
+-- Batch stok per produk. Satu penerimaan dapat membuat satu/lebih batch.
+-- Batch tanpa expiry_date (NULL) dialokasikan paling akhir (legacy/migrasi).
+CREATE TABLE IF NOT EXISTS stock_batches (
+    id SERIAL PRIMARY KEY,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    batch_code VARCHAR(60),
+    expiry_date DATE,
+    qty_received INTEGER NOT NULL CHECK (qty_received >= 0),
+    qty_remaining INTEGER NOT NULL,
+    unit_cost BIGINT NOT NULL DEFAULT 0,
+    source VARCHAR(20) NOT NULL DEFAULT 'purchase'
+        CHECK (source IN ('purchase', 'adjustment', 'opname', 'legacy', 'initial', 'shortfall')),
+    purchase_item_id INTEGER REFERENCES purchase_items(id),
+    received_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    note TEXT
+);
+
+-- Jejak alokasi batch per baris penjualan agar retur/void mengembalikan ke batch asal.
+CREATE TABLE IF NOT EXISTS sale_item_batches (
+    id SERIAL PRIMARY KEY,
+    sale_item_id INTEGER NOT NULL REFERENCES sale_items(id) ON DELETE CASCADE,
+    batch_id INTEGER NOT NULL REFERENCES stock_batches(id),
+    qty INTEGER NOT NULL CHECK (qty > 0),
+    cost_price BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ambang peringatan kadaluarsa (hari). Default 180 (~6 bulan).
+ALTER TABLE store_settings ADD COLUMN IF NOT EXISTS expiry_warning_days INTEGER NOT NULL DEFAULT 180;
+
+-- Pastikan CHECK source menyertakan 'shortfall' (untuk DB yang dibuat sebelum
+-- nilai ini ditambahkan). CREATE TABLE IF NOT EXISTS tidak mengubah tabel lama.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'stock_batches_source_check'
+          AND pg_get_constraintdef(oid) NOT LIKE '%shortfall%'
+    ) THEN
+        ALTER TABLE stock_batches DROP CONSTRAINT stock_batches_source_check;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'stock_batches_source_check'
+    ) THEN
+        ALTER TABLE stock_batches ADD CONSTRAINT stock_batches_source_check
+            CHECK (source IN ('purchase', 'adjustment', 'opname', 'legacy', 'initial', 'shortfall'));
+    END IF;
+END $$;
+
+-- Backfill batch legacy untuk stok yang sudah ada (idempotent: hanya produk tanpa batch).
+-- Hanya stok positif: produk dengan stok negatif (allow_negative_stock) tidak boleh
+-- masuk karena qty_received CHECK (>= 0) akan menggagalkan migrasi.
+INSERT INTO stock_batches (product_id, qty_received, qty_remaining, unit_cost, source, note)
+SELECT p.id, p.stock_qty, p.stock_qty, p.cost_price, 'legacy', 'Migrasi stok lama'
+FROM products p
+WHERE p.stock_qty > 0
+  AND NOT EXISTS (SELECT 1 FROM stock_batches b WHERE b.product_id = p.id);
+
+-- =========================================================
 -- Indeks
 -- =========================================================
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products (barcode);
@@ -498,3 +559,9 @@ CREATE INDEX IF NOT EXISTS idx_products_consignor ON products (consignor_id);
 CREATE INDEX IF NOT EXISTS idx_consignment_payouts_consignor ON consignment_payouts (consignor_id, created_at);
 -- P2: absensi
 CREATE INDEX IF NOT EXISTS idx_attendance_user_date ON attendance (user_id, work_date);
+-- P3: batch kadaluarsa (FEFO)
+CREATE INDEX IF NOT EXISTS idx_stock_batches_product_fefo
+    ON stock_batches (product_id, expiry_date NULLS LAST, received_at);
+CREATE INDEX IF NOT EXISTS idx_stock_batches_expiry ON stock_batches (expiry_date);
+CREATE INDEX IF NOT EXISTS idx_sale_item_batches_item ON sale_item_batches (sale_item_id);
+CREATE INDEX IF NOT EXISTS idx_sale_item_batches_batch ON sale_item_batches (batch_id);

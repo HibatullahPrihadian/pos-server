@@ -3,6 +3,14 @@ const { HttpError } = require('../middleware/error');
 // Terapkan perubahan stok secara atomik. WAJIB dipanggil dengan client transaksi.
 // Melakukan SELECT ... FOR UPDATE pada baris produk sehingga dua kasir tidak bisa
 // menjual unit terakhir secara bersamaan.
+//
+// Pembagian tanggung jawab agregat vs batch:
+// - Fungsi ini HANYA mengubah agregat `products.stock_qty` + `stock_movements`.
+//   Signature sengaja tidak diubah agar 10 call site tetap aman.
+// - Perubahan batch (FEFO) dilakukan TERPISAH oleh pemanggil yang relevan lewat
+//   `utils/batches.js` (allocateFefo/addBatch/restoreToBatch), dalam transaksi
+//   yang sama. Invariant: SUM(stock_batches.qty_remaining) == products.stock_qty
+//   (kecuali kasus stok minus / selisih penyesuaian).
 const applyStockMovement = async (client, {
   productId,
   qtyChange,

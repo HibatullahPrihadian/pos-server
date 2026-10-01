@@ -7,6 +7,7 @@ const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
 const { nextDocNumber } = require('../utils/invoice');
 const { applyStockMovement } = require('../utils/stock');
+const { allocateFefo, addBatch, recordShortfall } = require('../utils/batches');
 const { getSettings } = require('../utils/settings');
 const { logAudit } = require('../utils/audit');
 
@@ -84,6 +85,128 @@ router.get('/low', async (req, res, next) => {
 });
 
 // =========================================================
+// Batch & kadaluarsa
+// =========================================================
+// Daftar batch dengan filter produk/hari-kadaluarsa.
+router.get('/batches', async (req, res, next) => {
+  try {
+    const { page, limit, offset } = getPagination(req.query, { defaultLimit: 50 });
+    const productId = toInt(req.query.product_id, 0);
+    const withinDays = toInt(req.query.expiring_within_days, 0);
+    const includeExpired = req.query.include_expired === 'true' || req.query.include_expired === '1';
+    const onlyAvailable = req.query.only_available !== 'false';
+
+    const conditions = [];
+    const params = [];
+    if (productId > 0) {
+      params.push(productId);
+      conditions.push(`sb.product_id = $${params.length}`);
+    }
+    if (onlyAvailable) conditions.push('sb.qty_remaining > 0');
+    if (withinDays > 0) {
+      params.push(withinDays);
+      conditions.push(`sb.expiry_date IS NOT NULL AND sb.expiry_date <= CURRENT_DATE + $${params.length}::int`);
+      if (!includeExpired) {
+        conditions.push('sb.expiry_date >= CURRENT_DATE');
+      }
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM stock_batches sb ${where}`, params);
+    params.push(limit, offset);
+    const result = await pool.query(
+      `SELECT sb.*, p.sku, p.name AS product_name, p.base_unit,
+              (sb.expiry_date IS NOT NULL AND sb.expiry_date < CURRENT_DATE) AS is_expired,
+              (sb.expiry_date IS NOT NULL AND sb.expiry_date >= CURRENT_DATE
+                AND sb.expiry_date <= CURRENT_DATE + COALESCE(ss.expiry_warning_days, 180)) AS is_expiring
+       FROM stock_batches sb
+       JOIN products p ON p.id = sb.product_id
+       LEFT JOIN store_settings ss ON ss.id = 1
+       ${where}
+       ORDER BY sb.expiry_date NULLS LAST, sb.received_at DESC, sb.id DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json(paginated(result.rows, countResult.rows[0].total, page, limit));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Batch yang kadaluarsa dalam ambang peringatan (untuk dashboard).
+router.get('/expiring', async (req, res, next) => {
+  try {
+    const settings = await getSettings();
+    const warningDays = toInt(req.query.within_days, 0) || settings?.expiry_warning_days || 180;
+
+    const result = await pool.query(
+      `SELECT sb.id, sb.product_id, sb.batch_code, sb.expiry_date, sb.qty_remaining,
+              sb.unit_cost, p.sku, p.name AS product_name, p.base_unit, c.name AS category_name,
+              (sb.expiry_date < CURRENT_DATE) AS is_expired,
+              (sb.expiry_date - CURRENT_DATE) AS days_left
+       FROM stock_batches sb
+       JOIN products p ON p.id = sb.product_id
+       LEFT JOIN categories c ON c.id = p.category_id
+       WHERE sb.qty_remaining > 0
+         AND sb.expiry_date IS NOT NULL
+         AND sb.expiry_date >= CURRENT_DATE - INTERVAL '365 days'
+         AND sb.expiry_date <= CURRENT_DATE + $1::int
+       ORDER BY sb.expiry_date, p.name
+       LIMIT 200`,
+      [warningDays]
+    );
+
+    const expired = result.rows.filter((r) => r.is_expired);
+    const expiring = result.rows.filter((r) => !r.is_expired);
+    res.json({ warning_days: warningDays, expiring, expired });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Koreksi manual expiry/batch_code (admin).
+router.put('/batches/:id', requireRole('admin'), async (req, res, next) => {
+  try {
+    const batchId = toInt(req.params.id, 0);
+    if (batchId <= 0) throw new HttpError(400, 'ID batch tidak valid');
+
+    const updates = [];
+    const params = [];
+    if ('expiry_date' in (req.body || {})) {
+      const expiry = cleanString(req.body.expiry_date, 10);
+      if (expiry && !isValidDate(expiry)) throw new HttpError(400, 'Format expiry_date harus YYYY-MM-DD');
+      params.push(expiry || null);
+      updates.push(`expiry_date = $${params.length}`);
+    }
+    if ('batch_code' in (req.body || {})) {
+      params.push(cleanString(req.body.batch_code, 60));
+      updates.push(`batch_code = $${params.length}`);
+    }
+    if (updates.length === 0) throw new HttpError(400, 'Tidak ada perubahan');
+
+    params.push(batchId);
+    const result = await pool.query(
+      `UPDATE stock_batches SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      params
+    );
+    if (!result.rows[0]) throw new HttpError(404, 'Batch tidak ditemukan');
+
+    await logAudit(pool, {
+      userId: req.user.id,
+      action: 'update',
+      entity: 'stock_batches',
+      entityId: batchId,
+      detail: { expiry_date: req.body?.expiry_date, batch_code: req.body?.batch_code },
+    });
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================
 // Penyesuaian stok manual (admin)
 // =========================================================
 router.post('/adjustments', requireRole('admin'), async (req, res, next) => {
@@ -96,6 +219,10 @@ router.post('/adjustments', requireRole('admin'), async (req, res, next) => {
       throw new HttpError(400, 'qty_change harus bilangan bulat bukan nol');
     }
     const note = cleanString(req.body?.note, 300);
+    const expiryDate = cleanString(req.body?.expiry_date, 10);
+    if (expiryDate && !isValidDate(expiryDate)) {
+      throw new HttpError(400, 'Format expiry_date harus YYYY-MM-DD');
+    }
 
     const settings = await getSettings();
     const result = await withTransaction(async (client) => {
@@ -108,6 +235,34 @@ router.post('/adjustments', requireRole('admin'), async (req, res, next) => {
         userId: req.user.id,
         allowNegative: settings?.allow_negative_stock === true,
       });
+
+      // Sinkronkan batch: positif -> batch baru; negatif -> konsumsi FEFO.
+      if (qtyChange > 0) {
+        await addBatch(client, {
+          productId,
+          qtyBase: qtyChange,
+          unitCost: movement.previousCost,
+          expiryDate: expiryDate || null,
+          source: 'adjustment',
+          note: note || 'Penyesuaian stok',
+        });
+      } else {
+        const allocations = await allocateFefo(client, {
+          productId,
+          qtyBase: -qtyChange,
+          allowShortfall: true,
+          allowExpired: true,
+        });
+        const allocatedQty = allocations.reduce((sum, a) => sum + a.qty, 0);
+        if (allocatedQty < -qtyChange) {
+          await recordShortfall(client, {
+            productId,
+            qtyShortfall: -qtyChange - allocatedQty,
+            unitCost: movement.previousCost,
+            note: note || 'Stok minus penyesuaian',
+          });
+        }
+      }
       return movement;
     });
 
@@ -286,8 +441,12 @@ router.post('/opnames/:id/post', requireRole('admin'), async (req, res, next) =>
 
       let adjusted = 0;
       for (const item of itemsResult.rows) {
-        const locked = await client.query('SELECT stock_qty FROM products WHERE id = $1 FOR UPDATE', [item.product_id]);
+        const locked = await client.query(
+          'SELECT stock_qty, cost_price FROM products WHERE id = $1 FOR UPDATE',
+          [item.product_id]
+        );
         const currentQty = locked.rows[0]?.stock_qty ?? item.system_qty;
+        const costPrice = Number(locked.rows[0]?.cost_price || 0);
         const diff = item.counted_qty - currentQty;
         if (diff === 0) continue;
 
@@ -301,6 +460,36 @@ router.post('/opnames/:id/post', requireRole('admin'), async (req, res, next) =>
           userId: req.user.id,
           allowNegative: true,
         });
+
+        // Sinkronkan batch dengan selisih opname. Selisih positif memakai HPP
+        // produk saat ini agar COGS penjualan berikutnya tidak nol.
+        if (diff > 0) {
+          await addBatch(client, {
+            productId: item.product_id,
+            qtyBase: diff,
+            unitCost: costPrice,
+            expiryDate: null,
+            source: 'opname',
+            note: `Opname ${opname.code}`,
+          });
+        } else {
+          const allocations = await allocateFefo(client, {
+            productId: item.product_id,
+            qtyBase: -diff,
+            allowShortfall: true,
+            allowExpired: true,
+          });
+          const allocatedQty = allocations.reduce((sum, a) => sum + a.qty, 0);
+          if (allocatedQty < -diff) {
+            await recordShortfall(client, {
+              productId: item.product_id,
+              qtyShortfall: -diff - allocatedQty,
+              unitCost: costPrice,
+              note: `Stok minus opname ${opname.code}`,
+            });
+          }
+        }
+
         await client.query('UPDATE stock_opname_items SET diff = $1 WHERE id = $2', [diff, item.id]);
         adjusted += 1;
       }

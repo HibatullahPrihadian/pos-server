@@ -7,6 +7,7 @@ const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
 const { nextDocNumber } = require('../utils/invoice');
 const { applyStockMovement } = require('../utils/stock');
+const { addBatch } = require('../utils/batches');
 const { movingAverageCost } = require('../utils/money');
 const { getSettings } = require('../utils/settings');
 const { logAudit } = require('../utils/audit');
@@ -228,11 +229,21 @@ router.post('/:id/receive', requireRole('admin'), async (req, res, next) => {
 
       const input = Array.isArray(req.body?.items) ? req.body.items : null;
       const requested = new Map();
+      const itemMeta = new Map();
       if (input) {
         input.forEach((row) => {
           const itemId = toInt(row.purchase_item_id, 0);
           const qty = Math.round(Number(row.received_qty) || 0);
-          if (itemId > 0 && qty > 0) requested.set(itemId, qty);
+          if (itemId <= 0) return;
+          if (qty > 0) requested.set(itemId, qty);
+          const expiry = cleanString(row.expiry_date, 10);
+          if (expiry && !isValidDate(expiry)) {
+            throw new HttpError(400, 'Format expiry_date harus YYYY-MM-DD');
+          }
+          itemMeta.set(itemId, {
+            expiry_date: expiry || null,
+            batch_code: cleanString(row.batch_code, 60),
+          });
         });
       }
 
@@ -279,6 +290,19 @@ router.post('/:id/receive', requireRole('admin'), async (req, res, next) => {
           userId: req.user.id,
           allowNegative,
           newCostPrice: newCost,
+        });
+
+        // Buat batch baru untuk penerimaan ini (expiry opsional dari input).
+        const meta = itemMeta.get(item.id) || {};
+        await addBatch(client, {
+          productId: item.product_id,
+          qtyBase: baseReceiveQty,
+          unitCost: baseUnitCost,
+          expiryDate: meta.expiry_date || null,
+          batchCode: meta.batch_code || null,
+          source: 'purchase',
+          purchaseItemId: item.id,
+          note: `Penerimaan ${po.code}`,
         });
 
         await client.query(

@@ -42,6 +42,7 @@ const Purchases = () => {
   const [detail, setDetail] = useState(null);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [receiveQty, setReceiveQty] = useState({});
+  const [receiveMeta, setReceiveMeta] = useState({});
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [cancelConfirm, setCancelConfirm] = useState(null);
@@ -180,8 +181,13 @@ const Purchases = () => {
       const full = await api.get(`/api/purchases/${po.id}`);
       setDetail(full);
       const initial = {};
-      full.items.forEach((item) => { initial[item.id] = item.qty - item.received_qty; });
+      const meta = {};
+      full.items.forEach((item) => {
+        initial[item.id] = item.qty - item.received_qty;
+        meta[item.id] = { expiry_date: '', batch_code: '' };
+      });
       setReceiveQty(initial);
+      setReceiveMeta(meta);
       setReceiveOpen(true);
     } catch (err) {
       toast.error(err.message);
@@ -191,7 +197,12 @@ const Purchases = () => {
   const submitReceive = async () => {
     try {
       const items = Object.entries(receiveQty)
-        .map(([id, qty]) => ({ purchase_item_id: Number(id), received_qty: parseQty(qty) }))
+        .map(([id, qty]) => ({
+          purchase_item_id: Number(id),
+          received_qty: parseQty(qty),
+          expiry_date: receiveMeta[id]?.expiry_date || null,
+          batch_code: receiveMeta[id]?.batch_code || null,
+        }))
         .filter((i) => i.received_qty > 0);
       if (items.length === 0) return toast.warning('Isi jumlah terima minimal satu item');
       await api.post(`/api/purchases/${detail.id}/receive`, { items });
@@ -474,6 +485,7 @@ const Purchases = () => {
           <>
             <p className="text-sm text-slate-400 mb-4">
               Masukkan jumlah yang diterima. Stok bertambah dan HPP diperbarui dengan metode rata-rata bergerak.
+              Tanggal kadaluarsa opsional; isi agar penjualan memakai batch ini secara FEFO.
             </p>
             <Table
               columns={[
@@ -481,6 +493,8 @@ const Purchases = () => {
                 { key: 'ordered', label: 'Dipesan', align: 'right' },
                 { key: 'received', label: 'Sudah Diterima', align: 'right' },
                 { key: 'now', label: 'Terima Sekarang', align: 'right' },
+                { key: 'expiry', label: 'Kadaluarsa (opsional)' },
+                { key: 'batch_code', label: 'Kode Batch' },
               ]}
             >
               {detail.items.map((item) => (
@@ -494,6 +508,28 @@ const Purchases = () => {
                       className="w-24 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-right text-white"
                       value={receiveQty[item.id] ?? ''}
                       onChange={(e) => setReceiveQty({ ...receiveQty, [item.id]: e.target.value })}
+                    />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="date"
+                      className="bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-sm text-white"
+                      value={receiveMeta[item.id]?.expiry_date || ''}
+                      onChange={(e) => setReceiveMeta({
+                        ...receiveMeta,
+                        [item.id]: { ...(receiveMeta[item.id] || {}), expiry_date: e.target.value },
+                      })}
+                    />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      className="w-28 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-sm text-white"
+                      placeholder="Opsional"
+                      value={receiveMeta[item.id]?.batch_code || ''}
+                      onChange={(e) => setReceiveMeta({
+                        ...receiveMeta,
+                        [item.id]: { ...(receiveMeta[item.id] || {}), batch_code: e.target.value },
+                      })}
                     />
                   </td>
                 </tr>

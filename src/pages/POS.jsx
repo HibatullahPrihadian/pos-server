@@ -39,6 +39,7 @@ const POS = () => {
   const [search, setSearch] = useState('');
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [expiringProducts, setExpiringProducts] = useState({});
   const [categories, setCategories] = useState([]);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [tab, setTab] = useState('produk');
@@ -100,6 +101,18 @@ const POS = () => {
   }, [debouncedSearch, categoryFilter, toast]);
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
+
+  // Petunjuk visual batch mendekati/melewati kadaluarsa (server tetap penentu saat checkout).
+  useEffect(() => {
+    api.get('/api/stock/expiring')
+      .then((res) => {
+        const map = {};
+        (res.expiring || []).forEach((b) => { map[b.product_id] = b.is_expired ? 'expired' : 'soon'; });
+        (res.expired || []).forEach((b) => { map[b.product_id] = 'expired'; });
+        setExpiringProducts(map);
+      })
+      .catch(() => {});
+  }, []);
 
   // Sinkronkan harga efektif (tier/promo/member) dan info promo/tier dari server.
   // Server tetap menghitung ulang saat checkout. Di-debounce + dibatalkan agar
@@ -412,6 +425,7 @@ const POS = () => {
               {products.map((product) => {
                 const price = cart.member && product.member_price != null ? product.member_price : product.sell_price;
                 const low = product.stock_qty <= product.min_stock;
+                const expiryFlag = expiringProducts[product.id];
                 return (
                   <button
                     key={product.id}
@@ -424,7 +438,11 @@ const POS = () => {
                       <Badge tone={low ? 'orange' : 'neutral'}>{product.stock_qty}</Badge>
                     </div>
                     <div className="mt-2 text-ios-green font-semibold text-sm">{formatCurrency(price)}</div>
-                    <div className="text-xs text-slate-500 font-mono">{product.sku}</div>
+                    <div className="flex items-center justify-between gap-2 mt-1">
+                      <span className="text-xs text-slate-500 font-mono">{product.sku}</span>
+                      {expiryFlag === 'expired' && <Badge tone="red">Kadaluarsa</Badge>}
+                      {expiryFlag === 'soon' && <Badge tone="orange">Segera</Badge>}
+                    </div>
                   </button>
                 );
               })}

@@ -100,6 +100,14 @@ const assertFeatureSchema = async () => {
       sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
             WHERE table_name = 'attendance' AND column_name = 'shift_id'`,
     },
+    // P3: pelacakan kadaluarsa per-batch (FEFO).
+    { name: 'tabel stock_batches', sql: "SELECT to_regclass('public.stock_batches') AS ok" },
+    { name: 'tabel sale_item_batches', sql: "SELECT to_regclass('public.sale_item_batches') AS ok" },
+    {
+      name: 'kolom store_settings.expiry_warning_days',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'store_settings' AND column_name = 'expiry_warning_days'`,
+    },
   ];
 
   for (const check of required) {
