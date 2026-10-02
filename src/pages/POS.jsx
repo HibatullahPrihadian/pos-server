@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Search, Plus, Minus, Trash2, ScanLine, ShoppingCart, UserPlus, X,
-  Banknote, QrCode, CreditCard, Landmark, Printer, CheckCircle2, Coins, PackagePlus,
+  Banknote, QrCode, CreditCard, Landmark, Printer, CheckCircle2, Coins,
+  Percent,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -43,12 +45,12 @@ const POS = () => {
   const [products, setProducts] = useState([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [expiringProducts, setExpiringProducts] = useState({});
-  const [categories, setCategories] = useState([]);
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [tab, setTab] = useState('produk');
   const [bundles, setBundles] = useState([]);
+  const [searchOpen, setSearchOpen] = useState(false);
   const barcodeRef = useRef(null);
   const searchRef = useRef(null);
+  const dropdownRef = useRef(null);
+  const [dropdownRect, setDropdownRect] = useState(null);
 
   const [memberSearch, setMemberSearch] = useState('');
   const [memberResults, setMemberResults] = useState([]);
@@ -62,9 +64,56 @@ const POS = () => {
   const [receiptChange, setReceiptChange] = useState(0);
   const [unitPicker, setUnitPicker] = useState(null);
   const [scanOpen, setScanOpen] = useState(false);
+  const [discountEditorKey, setDiscountEditorKey] = useState(null);
 
   const debouncedSearch = useDebounce(search, 300);
   const debouncedMemberSearch = useDebounce(memberSearch, 300);
+
+  const dropdownVisible = searchOpen && debouncedSearch.trim().length > 0;
+
+  // Dropdown hasil dirender lewat portal ke document.body agar lolos dari
+  // stacking context `backdrop-filter` pada Card bar atas. Posisinya dihitung
+  // dari rect kolom pencarian dan diperbarui saat scroll/resize.
+  const updateDropdownRect = useCallback(() => {
+    const el = searchRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const gap = 8;
+    const spaceBelow = window.innerHeight - r.bottom;
+    const spaceAbove = r.top;
+    const openUp = spaceBelow < 240 && spaceAbove > spaceBelow;
+    setDropdownRect({
+      left: r.left,
+      width: r.width,
+      top: openUp ? undefined : r.bottom + gap,
+      bottom: openUp ? window.innerHeight - r.top + gap : undefined,
+      maxHeight: Math.max(160, (openUp ? spaceAbove : spaceBelow) - gap - 8),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!dropdownVisible) { setDropdownRect(null); return; }
+    updateDropdownRect();
+    window.addEventListener('scroll', updateDropdownRect, true);
+    window.addEventListener('resize', updateDropdownRect);
+    return () => {
+      window.removeEventListener('scroll', updateDropdownRect, true);
+      window.removeEventListener('resize', updateDropdownRect);
+    };
+  }, [dropdownVisible, updateDropdownRect]);
+
+  // Klik di luar dropdown/kolom pencarian menutup dropdown.
+  useEffect(() => {
+    if (!dropdownVisible) return;
+    const onMouseDown = (event) => {
+      const target = event.target;
+      if (dropdownRef.current?.contains(target)) return;
+      if (searchRef.current?.contains(target)) return;
+      setSearchOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [dropdownVisible]);
 
   const loadShift = useCallback(async () => {
     setShiftLoading(true);
@@ -80,17 +129,12 @@ const POS = () => {
 
   useEffect(() => { loadShift(); }, [loadShift]);
 
-  useEffect(() => {
-    api.get('/api/categories').then(setCategories).catch(() => {});
-  }, []);
-
   const loadProducts = useCallback(async () => {
     setLoadingProducts(true);
     try {
       const [result, bundleResult] = await Promise.all([
         api.get('/api/products', {
           search: debouncedSearch,
-          category_id: categoryFilter,
           limit: 40,
         }),
         api.get('/api/bundles', { is_active: true, limit: 100 }).catch(() => ({ data: [] })),
@@ -102,7 +146,7 @@ const POS = () => {
     } finally {
       setLoadingProducts(false);
     }
-  }, [debouncedSearch, categoryFilter, toast]);
+  }, [debouncedSearch, toast]);
 
   useEffect(() => { loadProducts(); }, [loadProducts]);
 
@@ -149,6 +193,16 @@ const POS = () => {
       .then((res) => setMemberResults(res.data))
       .catch(() => {});
   }, [debouncedMemberSearch]);
+
+  // Bersihkan editor diskon bila item hilang (mis. qty turun ke 0) atau keranjang kosong.
+  useEffect(() => {
+    if (cart.items.length === 0) { setDiscountEditorKey(null); return; }
+    if (discountEditorKey && !cart.items.some((i) => cart.keyOf(i) === discountEditorKey)) {
+      setDiscountEditorKey(null);
+    }
+    // keyOf stabil; sengaja hanya bergantung pada daftar item & key editor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart.items, discountEditorKey]);
 
   const focusBarcode = useCallback(() => barcodeRef.current?.focus(), []);
 
@@ -218,6 +272,12 @@ const POS = () => {
   }, [handleResolveBarcode, focusBarcode]);
 
   const selectProduct = async (product) => {
+    if (product.stock_qty <= 0) {
+      toast.warning(`${product.name} stok habis`);
+      return;
+    }
+    setSearch('');
+    setSearchOpen(false);
     try {
       const units = await api.get(`/api/products/${product.id}/units`);
       if (units.length > 0) {
@@ -229,6 +289,12 @@ const POS = () => {
     } catch {
       addProduct(product);
     }
+  };
+
+  const selectBundle = (bundle) => {
+    setSearch('');
+    setSearchOpen(false);
+    addBundleToCart(bundle);
   };
 
   const openPayment = () => {
@@ -291,6 +357,7 @@ const POS = () => {
       setReceiptChange(result.change);
       setPayOpen(false);
       cart.clear();
+      setDiscountEditorKey(null);
       loadProducts();
       toast.success(`Transaksi ${result.sale.invoice_no} berhasil`);
     } catch (err) {
@@ -306,7 +373,11 @@ const POS = () => {
     F2: () => searchRef.current?.focus(),
     F4: () => openPayment(),
     F8: () => { setPayments([{ method: 'cash', amount: String(estimatedTotal), reference: '' }]); setPayOpen(true); },
-    Escape: () => { if (payOpen) setPayOpen(false); else if (unitPicker) setUnitPicker(null); },
+    Escape: () => {
+      if (payOpen) setPayOpen(false);
+      else if (unitPicker) setUnitPicker(null);
+      else if (searchOpen) { setSearchOpen(false); setSearch(''); }
+    },
   });
 
   // Perkiraan total di sisi klien (server tetap menghitung ulang saat checkout).
@@ -349,243 +420,165 @@ const POS = () => {
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[1fr_460px] gap-5 h-[calc(100vh-140px)]">
-      {/* Kolom kiri: scan & katalog produk */}
-      <div className="flex flex-col gap-4 overflow-hidden min-h-0">
-        <Card padded={false} className="shrink-0">
-          <div className="p-4 space-y-3">
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <ScanLine size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-ios-green" />
-                <input
-                  ref={barcodeRef}
-                  className="w-full bg-slate-950/60 border border-ios-green/40 rounded-ios-sm pl-10 pr-3 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-ios-green"
-                  placeholder="Scan barcode lalu Enter..."
-                  value={barcode}
-                  onChange={(e) => setBarcode(e.target.value)}
-                  onKeyDown={handleBarcode}
-                />
-              </div>
-              <CameraScanButton
-                onClick={() => setScanOpen(true)}
-                label="Kamera"
-                className="shrink-0 px-3"
-                size="lg"
+    <div className="flex flex-col gap-3 h-[calc(100vh-140px)]">
+      {/* Bar atas: scan + kamera + pencarian (dropdown hasil) */}
+      <Card padded={false} className="shrink-0">
+        <div className="p-4">
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <ScanLine size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-ios-green" />
+              <input
+                ref={barcodeRef}
+                className="w-full bg-slate-950/60 border border-ios-green/40 rounded-ios-sm pl-10 pr-3 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-ios-green"
+                placeholder="Scan barcode lalu Enter..."
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+                onKeyDown={handleBarcode}
               />
-              <div className="relative flex-1">
-                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input
-                  ref={searchRef}
-                  className="w-full bg-slate-950/60 border border-white/10 rounded-ios-sm pl-10 pr-3 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
-                  placeholder="Cari produk (F2)..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
+            </div>
+            <CameraScanButton
+              onClick={() => setScanOpen(true)}
+              label="Kamera"
+              className="shrink-0 px-3"
+              size="lg"
+            />
+            <div className="relative flex-1">
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                ref={searchRef}
+                className="w-full bg-slate-950/60 border border-white/10 rounded-ios-sm pl-10 pr-3 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
+                placeholder="Cari produk (F2)..."
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setSearchOpen(true); }}
+                onFocus={() => { if (search.trim()) setSearchOpen(true); }}
+              />
+              {searchOpen && debouncedSearch.trim().length > 0 && (
+                <SearchResults
+                  anchorRect={dropdownRect}
+                  containerRef={dropdownRef}
+                  loading={loadingProducts}
+                  products={products}
+                  bundles={bundles}
+                  query={debouncedSearch}
+                  member={cart.member}
+                  expiringProducts={expiringProducts}
+                  onSelectProduct={selectProduct}
+                  onSelectBundle={selectBundle}
                 />
-              </div>
+              )}
             </div>
+          </div>
+        </div>
+      </Card>
 
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              <button
-                onClick={() => setTab('produk')}
-                className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors ${tab === 'produk' ? 'bg-ios-blue text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-              >
-                Produk
-              </button>
-              <button
-                onClick={() => setTab('paket')}
-                className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors flex items-center gap-1 ${tab === 'paket' ? 'bg-ios-purple text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-              >
-                <PackagePlus size={12} /> Paket
-              </button>
-            </div>
-
-            {tab === 'produk' && (
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              <button
-                onClick={() => setCategoryFilter('')}
-                className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors ${!categoryFilter ? 'bg-ios-blue text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-              >
-                Semua
-              </button>
-              {categories.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => setCategoryFilter(String(c.id))}
-                  className={`px-3 py-1.5 rounded-full text-xs whitespace-nowrap transition-colors ${categoryFilter === String(c.id) ? 'bg-ios-blue text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
+      {/* Keranjang: mengisi penuh sisa tinggi 1 kolom */}
+      <Card
+        padded={false}
+        className="flex flex-col overflow-hidden flex-1 min-h-0"
+        bodyClassName="flex flex-col flex-1 min-h-0 overflow-hidden"
+      >
+        <div className="p-4 border-b border-white/10 shrink-0">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-semibold text-white flex items-center gap-2">
+              <ShoppingCart size={18} /> Keranjang ({cart.items.length})
+            </h3>
+            {cart.items.length > 0 && (
+              <Button variant="ghost" size="sm" onClick={() => { setDiscountEditorKey(null); cart.clear(); }}>
+                <Trash2 size={14} /> Kosongkan
+              </Button>
             )}
           </div>
-        </Card>
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {loadingProducts ? (
-            <div className="text-center py-10 text-slate-400">Memuat produk...</div>
-          ) : tab === 'paket' ? (
-            bundles.length === 0 ? (
-              <div className="text-center py-10 text-slate-500">Belum ada paket aktif</div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-3">
-                {bundles.map((bundle) => (
-                  <button
-                    key={bundle.id}
-                    onClick={() => addBundleToCart(bundle)}
-                    className="text-left bg-slate-900/65 backdrop-blur-glass border border-ios-purple/30 rounded-ios-sm p-3 hover:border-ios-purple/60 hover:bg-slate-900 transition-all"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm text-white font-medium line-clamp-2">{bundle.name}</span>
-                      <Badge tone="purple">PAKET</Badge>
-                    </div>
-                    <div className="mt-2 text-ios-green font-semibold text-sm">{formatCurrency(bundle.price)}</div>
-                    <div className="text-xs text-slate-500 font-mono">{bundle.sku}</div>
-                  </button>
-                ))}
+          {cart.member ? (
+            <div className="flex items-center justify-between px-3 py-2 rounded-ios-sm bg-ios-purple/10 border border-ios-purple/30">
+              <div>
+                <div className="text-sm text-white">{cart.member.name}</div>
+                <div className="text-xs text-ios-yellow flex items-center gap-1">
+                  <Coins size={12} /> {cart.member.points} poin
+                </div>
               </div>
-            )
-          ) : products.length === 0 ? (
-            <div className="text-center py-10 text-slate-500">Produk tidak ditemukan</div>
+              <button onClick={() => { cart.setMember(null); cart.setRedeemPoints(0); }} className="p-1 hover:bg-white/10 rounded">
+                <X size={14} />
+              </button>
+            </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-4 gap-3">
-              {products.map((product) => {
-                const price = cart.member && product.member_price != null ? product.member_price : product.sell_price;
-                const low = product.stock_qty <= product.min_stock;
-                const expiryFlag = expiringProducts[product.id];
-                return (
-                  <button
-                    key={product.id}
-                    onClick={() => selectProduct(product)}
-                    disabled={product.stock_qty <= 0}
-                    className="text-left bg-slate-900/65 backdrop-blur-glass border border-white/10 rounded-ios-sm p-3 hover:border-ios-blue/50 hover:bg-slate-900 transition-all disabled:opacity-40"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="text-sm text-white font-medium line-clamp-2">{product.name}</span>
-                      <Badge tone={low ? 'orange' : 'neutral'}>{product.stock_qty}</Badge>
-                    </div>
-                    <div className="mt-2 text-ios-green font-semibold text-sm">{formatCurrency(price)}</div>
-                    <div className="flex items-center justify-between gap-2 mt-1">
-                      <span className="text-xs text-slate-500 font-mono">{product.sku}</span>
-                      {expiryFlag === 'expired' && <Badge tone="red">Kadaluarsa</Badge>}
-                      {expiryFlag === 'soon' && <Badge tone="orange">Segera</Badge>}
-                    </div>
-                  </button>
-                );
-              })}
+            <div className="flex gap-2">
+              <Button variant="neutral" size="sm" className="flex-1" onClick={() => setMemberModal(true)}>
+                <UserPlus size={14} /> Pilih Member
+              </Button>
             </div>
           )}
         </div>
-      </div>
 
-      {/* Kolom kanan: keranjang (scroll) + ringkasan biaya terpisah */}
-      <div className="flex flex-col gap-3 overflow-hidden min-h-0">
-        <Card
-          padded={false}
-          className="flex flex-col overflow-hidden flex-1 min-h-0"
-          bodyClassName="flex flex-col flex-1 min-h-0 overflow-hidden"
-        >
-          <div className="p-4 border-b border-white/10 shrink-0">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold text-white flex items-center gap-2">
-                <ShoppingCart size={18} /> Keranjang ({cart.items.length})
-              </h3>
-              {cart.items.length > 0 && (
-                <Button variant="ghost" size="sm" onClick={cart.clear}>
-                  <Trash2 size={14} /> Kosongkan
-                </Button>
-              )}
+        <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
+          {cart.items.length === 0 ? (
+            <div className="text-center py-12 text-slate-500 text-sm">
+              Scan barcode atau cari produk untuk memulai
             </div>
-
-            {cart.member ? (
-              <div className="flex items-center justify-between px-3 py-2 rounded-ios-sm bg-ios-purple/10 border border-ios-purple/30">
-                <div>
-                  <div className="text-sm text-white">{cart.member.name}</div>
-                  <div className="text-xs text-ios-yellow flex items-center gap-1">
-                    <Coins size={12} /> {cart.member.points} poin
-                  </div>
-                </div>
-                <button onClick={() => { cart.setMember(null); cart.setRedeemPoints(0); }} className="p-1 hover:bg-white/10 rounded">
-                  <X size={14} />
-                </button>
-              </div>
-            ) : (
-              <div className="flex gap-2">
-                <Button variant="neutral" size="sm" className="flex-1" onClick={() => setMemberModal(true)}>
-                  <UserPlus size={14} /> Pilih Member
-                </Button>
-              </div>
-            )}
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-2">
-            {cart.items.length === 0 ? (
-              <div className="text-center py-12 text-slate-500 text-sm">
-                Scan barcode atau pilih produk untuk memulai
-              </div>
-            ) : (
-              cart.items.map((item) => {
-                const key = cart.keyOf(item);
-                return (
-                  <div key={key} className="bg-white/5 rounded-ios-sm p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm text-white truncate flex items-center gap-2">
-                          {item.name}
-                          {item.bundle_id && <Badge tone="purple">PAKET</Badge>}
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          {formatCurrency(item.price)} / {item.bundle_id ? 'paket' : item.unit_name}
-                        </div>
-                        {item.promo_name && (
-                          <div className="mt-1 flex items-center gap-1">
-                            <Badge tone="red">PROMO</Badge>
-                            <span className="text-[10px] text-ios-red truncate">{item.promo_name}</span>
-                          </div>
-                        )}
-                        {item.tier_min_qty && (
-                          <div className="mt-1 text-[10px] text-ios-green">Harga grosir berlaku (min {item.tier_min_qty})</div>
-                        )}
+          ) : (
+            cart.items.map((item) => {
+              const key = cart.keyOf(item);
+              const editorOpen = discountEditorKey === key;
+              return (
+                <div key={key} className="bg-white/5 rounded-ios-sm px-3 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm text-white truncate">{item.name}</div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 truncate">
+                        <span className="shrink-0">{formatCurrency(item.price)} / {item.bundle_id ? 'paket' : item.unit_name}</span>
+                        {item.bundle_id && <span className="shrink-0 text-ios-purple font-medium">PAKET</span>}
+                        {item.promo_name && <span className="truncate text-ios-red font-medium">PROMO: {item.promo_name}</span>}
+                        {item.tier_min_qty && <span className="shrink-0 text-ios-green font-medium">Grosir (min {item.tier_min_qty})</span>}
                       </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
                       <button
-                        onClick={() => cart.removeItemByKey(key)}
-                        className="p-1 hover:bg-white/10 rounded text-ios-red"
+                        onClick={() => cart.updateQtyByKey(key, item.qty - 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded bg-white/10 hover:bg-white/20 text-white"
                       >
-                        <Trash2 size={14} />
+                        <Minus size={14} />
+                      </button>
+                      <input
+                        type="number"
+                        className="w-10 text-center bg-slate-950/60 border border-white/10 rounded py-1 text-sm text-white"
+                        value={item.qty}
+                        onChange={(e) => cart.updateQtyByKey(key, parseQty(e.target.value))}
+                      />
+                      <button
+                        onClick={() => cart.updateQtyByKey(key, item.qty + 1)}
+                        className="w-7 h-7 flex items-center justify-center rounded bg-white/10 hover:bg-white/20 text-white"
+                      >
+                        <Plus size={14} />
                       </button>
                     </div>
-                    <div className="flex items-center justify-between mt-2">
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => cart.updateQtyByKey(key, item.qty - 1)}
-                          className="w-7 h-7 flex items-center justify-center rounded bg-white/10 hover:bg-white/20 text-white"
-                        >
-                          <Minus size={14} />
-                        </button>
-                        <input
-                          type="number"
-                          className="w-12 text-center bg-slate-950/60 border border-white/10 rounded py-1 text-sm text-white"
-                          value={item.qty}
-                          onChange={(e) => cart.updateQtyByKey(key, parseQty(e.target.value))}
-                        />
-                        <button
-                          onClick={() => cart.updateQtyByKey(key, item.qty + 1)}
-                          className="w-7 h-7 flex items-center justify-center rounded bg-white/10 hover:bg-white/20 text-white"
-                        >
-                          <Plus size={14} />
-                        </button>
+                    <div className="text-right shrink-0 w-24">
+                      <div className="text-sm text-white font-medium">
+                        {formatCurrency(item.price * item.qty - item.discount)}
                       </div>
-                      <div className="text-right">
-                        <div className="text-sm text-white font-medium">
-                          {formatCurrency(item.price * item.qty - item.discount)}
-                        </div>
-                        {item.discount > 0 && (
-                          <div className="text-xs text-ios-orange">-{formatCurrency(item.discount)}</div>
-                        )}
-                      </div>
+                      {item.discount > 0 && (
+                        <div className="text-[10px] text-ios-orange">-{formatCurrency(item.discount)}</div>
+                      )}
                     </div>
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className="text-xs text-slate-500">Diskon item</span>
+                    <button
+                      onClick={() => setDiscountEditorKey(editorOpen ? null : key)}
+                      title="Diskon item"
+                      className={`p-1 rounded shrink-0 ${item.discount > 0 ? 'text-ios-orange bg-ios-orange/15' : 'text-slate-400 hover:bg-white/10'}`}
+                    >
+                      <Percent size={14} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (discountEditorKey === key) setDiscountEditorKey(null);
+                        cart.removeItemByKey(key);
+                      }}
+                      className="p-1 hover:bg-white/10 rounded text-ios-red shrink-0"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  {editorOpen && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className="text-[10px] text-slate-500">Diskon item</span>
                       <input
                         type="number"
                         className="w-24 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-white text-right"
@@ -594,76 +587,75 @@ const POS = () => {
                         onChange={(e) => cart.updateDiscountByKey(key, parseMoney(e.target.value))}
                       />
                     </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </Card>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </Card>
 
-        {/* Ringkasan biaya dipisah agar selalu terlihat dan tidak ikut ter-scroll */}
-        <Card
-          className="shrink-0 flex flex-col max-h-[52vh]"
-          bodyClassName="flex flex-col flex-1 min-h-0 gap-2"
-        >
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
-            <div className="flex justify-between text-sm text-slate-400">
-              <span>Subtotal</span>
-              <span className="text-white">{formatCurrency(cart.totals.subtotal)}</span>
+      {/* Bar ringkasan total sticky di bawah, selalu terlihat */}
+      <Card
+        className="shrink-0"
+        bodyClassName="flex flex-col gap-2"
+      >
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-slate-400">Subtotal</span>
+            <span className="text-white">{formatCurrency(cart.totals.subtotal)}</span>
+          </div>
+          {cart.totals.itemDiscount > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-slate-400">Diskon Item</span>
+              <span className="text-ios-orange">-{formatCurrency(cart.totals.itemDiscount)}</span>
             </div>
-            {cart.totals.itemDiscount > 0 && (
-              <div className="flex justify-between text-sm text-slate-400">
-                <span>Diskon Item</span>
-                <span className="text-ios-orange">-{formatCurrency(cart.totals.itemDiscount)}</span>
-              </div>
-            )}
-            <div className="flex items-center justify-between text-sm text-slate-400">
-              <span>Diskon Transaksi</span>
+          )}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-slate-400">Diskon Transaksi</span>
+            <input
+              type="number"
+              className="w-28 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-sm text-white text-right"
+              value={cart.txnDiscount || ''}
+              placeholder="0"
+              onChange={(e) => cart.setTxnDiscount(parseMoney(e.target.value))}
+            />
+          </div>
+          {cart.member && maxRedeemable > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-slate-400">Tukar Poin (maks {maxRedeemable})</span>
               <input
                 type="number"
                 className="w-28 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-sm text-white text-right"
-                value={cart.txnDiscount || ''}
+                value={cart.redeemPoints || ''}
                 placeholder="0"
-                onChange={(e) => cart.setTxnDiscount(parseMoney(e.target.value))}
+                max={maxRedeemable}
+                onChange={(e) => cart.setRedeemPoints(Math.min(maxRedeemable, parseQty(e.target.value)))}
               />
             </div>
-            {cart.member && maxRedeemable > 0 && (
-              <div className="flex items-center justify-between text-sm text-slate-400">
-                <span>Tukar Poin (maks {maxRedeemable})</span>
-                <input
-                  type="number"
-                  className="w-28 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-sm text-white text-right"
-                  value={cart.redeemPoints || ''}
-                  placeholder="0"
-                  max={maxRedeemable}
-                  onChange={(e) => cart.setRedeemPoints(Math.min(maxRedeemable, parseQty(e.target.value)))}
-                />
-              </div>
-            )}
-            {cart.redeemPoints > 0 && (
-              <div className="flex justify-between text-sm text-slate-400">
-                <span>Nilai Poin</span>
-                <span className="text-ios-purple">-{formatCurrency(Math.min(pointsValue, cart.totals.afterTxn))}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-sm text-slate-400">
-              <span>PPN {taxIncluded ? '(incl.)' : ''}</span>
-              <span className="text-white">{formatCurrency(estimatedTax)}</span>
+          )}
+          {cart.redeemPoints > 0 && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-slate-400">Nilai Poin</span>
+              <span className="text-ios-purple">-{formatCurrency(Math.min(pointsValue, cart.totals.afterTxn))}</span>
             </div>
+          )}
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-slate-400">PPN {taxIncluded ? '(incl.)' : ''}</span>
+            <span className="text-white">{formatCurrency(estimatedTax)}</span>
           </div>
+        </div>
 
-          <div className="shrink-0 pt-2 border-t border-white/10">
-            <div className="flex justify-between items-baseline">
-              <span className="text-white font-semibold">TOTAL</span>
-              <span className="text-3xl font-bold text-ios-green">{formatCurrency(estimatedTotal)}</span>
-            </div>
-
-            <Button className="w-full mt-3" size="lg" variant="success" onClick={openPayment} disabled={cart.items.length === 0}>
-              <Banknote size={18} /> Bayar (F4)
-            </Button>
+        <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-4">
+          <div className="flex items-baseline gap-3">
+            <span className="text-white font-semibold">TOTAL</span>
+            <span className="text-3xl font-bold text-ios-green">{formatCurrency(estimatedTotal)}</span>
           </div>
-        </Card>
-      </div>
+          <Button size="lg" variant="success" onClick={openPayment} disabled={cart.items.length === 0}>
+            <Banknote size={18} /> Bayar (F4)
+          </Button>
+        </div>
+      </Card>
 
       {/* Modal pemindai kamera */}
       <BarcodeScannerModal
@@ -869,6 +861,96 @@ const POS = () => {
         )}
       </Modal>
     </div>
+  );
+};
+
+// Dropdown hasil pencarian: produk + paket. Muncul saat kasir mengetik dan
+// menggantikan grid katalog yang dihapus. Produk multi-satuan tetap lewat
+// selectProduct (unit picker), produk stok 0 tidak bisa ditambahkan.
+const SearchResults = ({ anchorRect, containerRef, loading, products, bundles, query, member, expiringProducts, onSelectProduct, onSelectBundle }) => {
+  const q = String(query || '').trim().toLowerCase();
+  const shownBundles = loading
+    ? []
+    : bundles.filter((b) => !q || b.name?.toLowerCase().includes(q) || b.sku?.toLowerCase().includes(q));
+  const shownProducts = products;
+  const hasResults = shownProducts.length > 0 || shownBundles.length > 0;
+  if (!anchorRect) return null;
+  return createPortal(
+    <div
+      ref={containerRef}
+      style={{
+        position: 'fixed',
+        left: anchorRect.left,
+        width: anchorRect.width,
+        top: anchorRect.top,
+        bottom: anchorRect.bottom,
+        maxHeight: anchorRect.maxHeight,
+      }}
+      className="z-50 overflow-y-auto bg-slate-900 border border-white/15 rounded-ios-sm shadow-xl backdrop-blur-glass"
+    >
+      {loading && !hasResults && (
+        <div className="px-4 py-6 text-center text-sm text-slate-400">Mencari...</div>
+      )}
+      {!loading && !hasResults && (
+        <div className="px-4 py-6 text-center text-sm text-slate-500">Produk tidak ditemukan</div>
+      )}
+
+      {shownBundles.length > 0 && (
+        <div>
+          <div className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wide text-ios-purple">Paket</div>
+          {shownBundles.map((bundle) => (
+            <button
+              key={`bundle-${bundle.id}`}
+              onClick={() => onSelectBundle(bundle)}
+              className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-white/10"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-white truncate flex items-center gap-2">
+                  {bundle.name}
+                  <Badge tone="purple">PAKET</Badge>
+                </div>
+                <div className="text-xs text-slate-500 font-mono">{bundle.sku}</div>
+              </div>
+              <span className="text-ios-green font-semibold text-sm">{formatCurrency(bundle.price)}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {shownProducts.length > 0 && (
+        <div>
+          <div className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wide text-ios-blue">Produk</div>
+          {shownProducts.map((product) => {
+            const price = member && product.member_price != null ? product.member_price : product.sell_price;
+            const out = product.stock_qty <= 0;
+            const expiryFlag = expiringProducts[product.id];
+            return (
+              <button
+                key={`product-${product.id}`}
+                onClick={() => onSelectProduct(product)}
+                className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-white/10 disabled:opacity-40"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm text-white truncate flex items-center gap-2">
+                    {product.name}
+                    {expiryFlag === 'expired' && <Badge tone="red">Kadaluarsa</Badge>}
+                    {expiryFlag === 'soon' && <Badge tone="orange">Segera</Badge>}
+                  </div>
+                  <div className="text-xs text-slate-500 font-mono flex items-center gap-2">
+                    {product.sku}
+                    <span className={out ? 'text-ios-red' : 'text-slate-500'}>
+                      {out ? 'stok habis' : `stok ${product.stock_qty}`}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-ios-green font-semibold text-sm">{formatCurrency(price)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>,
+    document.body
   );
 };
 
