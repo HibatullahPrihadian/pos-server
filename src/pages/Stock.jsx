@@ -10,8 +10,11 @@ import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
+import BarcodeScannerModal from '../components/scanner/BarcodeScannerModal';
+import CameraScanButton from '../components/scanner/CameraScanButton';
 import useDebounce from '../hooks/useDebounce';
 import { formatDateTime, formatDate, todayIso, firstOfMonthIso } from '../utils/formatters';
+import { resolveBarcode } from '../utils/barcode';
 import { STOCK_TYPE_LABELS } from '../utils/labels';
 
 const TABS = [
@@ -43,6 +46,7 @@ const Stock = () => {
   const [batchExpiring, setBatchExpiring] = useState('');
   const [editBatch, setEditBatch] = useState(null);
   const [editBatchForm, setEditBatchForm] = useState({ expiry_date: '', batch_code: '' });
+  const [scanOpen, setScanOpen] = useState(false);
 
   const debouncedSearch = useDebounce(productSearch, 350);
 
@@ -107,6 +111,21 @@ const Stock = () => {
       .then((res) => setProducts(res.data))
       .catch(() => {});
   }, [debouncedSearch]);
+
+  // Hasil kamera: pilih produk yang cocok agar kartu stok/batch tersaring.
+  const handleCameraScan = async (code) => {
+    setScanOpen(false);
+    try {
+      const { product } = await resolveBarcode(code);
+      setSelectedProduct(String(product.id));
+      setBatchProductFilter(String(product.id));
+      setProductSearch(product.name);
+      setPage(1);
+      toast.success(`${product.name} dipilih`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
 
   const submitAdjust = async () => {
     try {
@@ -193,6 +212,7 @@ const Stock = () => {
                 onChange={(e) => setProductSearch(e.target.value)}
               />
             </div>
+            <CameraScanButton onClick={() => setScanOpen(true)} label="Kamera" />
             <select
               className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white focus:outline-none focus:border-ios-blue/60"
               value={selectedProduct}
@@ -273,6 +293,7 @@ const Stock = () => {
       {tab === 'batches' && (
         <Card padded={false}>
           <div className="p-4 flex flex-wrap gap-3 border-b border-white/10">
+            <CameraScanButton onClick={() => setScanOpen(true)} label="Scan Kamera" />
             <select
               className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white focus:outline-none focus:border-ios-blue/60"
               value={batchProductFilter}
@@ -338,6 +359,12 @@ const Stock = () => {
           <Button onClick={() => setAdjustOpen(true)}><ArrowLeftRight size={16} /> Buat Penyesuaian</Button>
         </Card>
       )}
+
+      <BarcodeScannerModal
+        isOpen={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onDetect={handleCameraScan}
+      />
 
       <Modal
         isOpen={adjustOpen}

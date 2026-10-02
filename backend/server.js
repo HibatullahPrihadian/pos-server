@@ -58,6 +58,7 @@ app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/members', require('./routes/members'));
 app.use('/api/stock', require('./routes/stock'));
 app.use('/api/purchases', require('./routes/purchases'));
+app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/returns', require('./routes/returns'));
 app.use('/api/shifts', require('./routes/shifts'));
@@ -108,6 +109,9 @@ const assertFeatureSchema = async () => {
       sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
             WHERE table_name = 'store_settings' AND column_name = 'expiry_warning_days'`,
     },
+    // P4: beban operasional (laba rugi).
+    { name: 'tabel expense_categories', sql: "SELECT to_regclass('public.expense_categories') AS ok" },
+    { name: 'tabel expenses', sql: "SELECT to_regclass('public.expenses') AS ok" },
   ];
 
   for (const check of required) {

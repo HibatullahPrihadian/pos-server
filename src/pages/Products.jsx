@@ -11,7 +11,10 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import BarcodeScannerModal from '../components/scanner/BarcodeScannerModal';
+import CameraScanButton from '../components/scanner/CameraScanButton';
 import useDebounce from '../hooks/useDebounce';
+import { resolveBarcode } from '../utils/barcode';
 
 const EMPTY = { sku: '', barcode: '', name: '', category_id: '', supplier_id: '', base_unit: 'pcs', cost_price: '', sell_price: '', member_price: '', min_stock: '', is_active: true, is_consignment: false, consignor_id: '' };
 
@@ -31,6 +34,7 @@ const Products = () => {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [confirm, setConfirm] = useState(null);
+  const [scanOpen, setScanOpen] = useState(false);
 
   const [unitsProduct, setUnitsProduct] = useState(null);
   const [units, setUnits] = useState([]);
@@ -142,6 +146,21 @@ const Products = () => {
       load();
     } catch (err) {
       toast.error(err.message);
+    }
+  };
+
+  // Hasil kamera: isi field barcode, lalu cek apakah sudah dipakai produk lain.
+  const handleCameraScan = async (code) => {
+    const trimmed = String(code || '').trim();
+    setForm((f) => ({ ...f, barcode: trimmed }));
+    setScanOpen(false);
+    try {
+      const { product } = await resolveBarcode(trimmed);
+      if (product && product.id !== editing?.id) {
+        toast.error(`Barcode sudah dipakai: ${product.name}`);
+      }
+    } catch {
+      // 404 = barcode baru (jalur normal); error jaringan tidak memblokir pengisian.
     }
   };
 
@@ -373,7 +392,10 @@ const Products = () => {
       >
         <div className="grid grid-cols-2 gap-4">
           <Input label="SKU *" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
-          <Input label="Barcode" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} />
+          <div className="flex gap-2 items-end">
+            <Input label="Barcode" className="flex-1" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} />
+            <CameraScanButton onClick={() => setScanOpen(true)} label="Kamera" />
+          </div>
           <Input label="Nama Produk *" className="col-span-2" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <Input as="select" label="Kategori" value={form.category_id} onChange={(e) => setForm({ ...form, category_id: e.target.value })}>
             <option value="">- Pilih -</option>
@@ -405,6 +427,12 @@ const Products = () => {
         </div>
         <p className="mt-3 text-xs text-slate-500">Semua harga dalam rupiah dan sudah termasuk PPN. Harga Beli (HPP) produk konsinyasi dipakai sebagai harga setor ke penitip.</p>
       </Modal>
+
+      <BarcodeScannerModal
+        isOpen={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onDetect={handleCameraScan}
+      />
 
       <Modal isOpen={Boolean(unitsProduct)} onClose={() => setUnitsProduct(null)} title={`Satuan - ${unitsProduct?.name || ''}`}>
         <div className="space-y-3 mb-4">

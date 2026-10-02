@@ -20,6 +20,7 @@ import Suppliers from './pages/Suppliers';
 import Stock from './pages/Stock';
 import StockOpname from './pages/StockOpname';
 import Purchases from './pages/Purchases';
+import Expenses from './pages/Expenses';
 import Members from './pages/Members';
 import Shifts from './pages/Shifts';
 import Reports from './pages/Reports';
@@ -58,6 +59,7 @@ function App() {
                 <Route path="/stock" element={<Page adminOnly><Stock /></Page>} />
                 <Route path="/stock-opname" element={<Page adminOnly><StockOpname /></Page>} />
                 <Route path="/purchases" element={<Page adminOnly><Purchases /></Page>} />
+                <Route path="/expenses" element={<Page adminOnly><Expenses /></Page>} />
 
                 <Route path="/members" element={<Page><Members /></Page>} />
                 <Route path="/reports" element={<Page adminOnly><Reports /></Page>} />

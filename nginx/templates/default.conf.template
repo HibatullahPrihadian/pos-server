@@ -1,0 +1,65 @@
+# Konfigurasi nginx untuk aplikasi POS.
+#
+# HTTPS diperlukan agar browser di HP (LAN) memberi akses kamera: getUserMedia
+# hanya tersedia pada secure context. Sertifikat dimount ke /etc/nginx/certs
+# (lihat docker-compose.yml); bila belum ada, blok 443 gagal start sehingga
+# container frontend tidak naik — buat sertifikat lebih dulu (lihat README).
+
+# Pengalihan HTTP -> HTTPS.
+#
+# Memakai $host agar host pada Location sama dengan host yang dipakai klien
+# (mis. alamat LAN dari HP). $server_name tidak dipakai karena dengan
+# `server_name _;` nilainya harfiah `_` sehingga Location menjadi
+# `https://_:PORT` yang tidak dapat diresolve. $host berasal dari header Host
+# klien; redirect hanya mengarah ke skema HTTPS pada host yang sama, sehingga
+# tidak membuka open redirect lintas domain.
+#
+# Port HTTPS diambil dari env `HTTPS_HOST_PORT` (lihat docker-compose.yml,
+# berasal dari FRONTEND_HTTPS_HOST_PORT) melalui template resmi nginx
+# (nginx:stable-alpine memproses /etc/nginx/templates/*.template). Substitusi
+# ini menjaga redirect tetap benar walau FRONTEND_HTTPS_HOST_PORT diubah.
+server {
+    listen 80;
+    server_name _;
+
+    client_max_body_size 8m;
+
+    return 301 https://$host:${HTTPS_HOST_PORT}$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/certs/pos.crt;
+    ssl_certificate_key /etc/nginx/certs/pos.key;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+
+    client_max_body_size 8m;
+
+    location / {
+        root /usr/share/nginx/html;
+        index index.html index.htm;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://backend:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /uploads/ {
+        proxy_pass http://backend:5000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}

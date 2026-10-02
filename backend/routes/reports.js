@@ -34,6 +34,18 @@ const GROSS_PROFIT_EXPR = `
   SUM(si.line_total - (si.cost_price * si.qty))::bigint
 `;
 
+// Retur periode: refund ke pelanggan (kas keluar) dan HPP barang yang diretur.
+// HPP retur = cost_price pada sale_item (per satuan jual) x qty retur. Rekonsiliasi:
+// Laba kotor bersih = gross_profit - (return_refund - return_cogs).
+const RETURN_COGS_EXPR = `
+  COALESCE(SUM(ri.qty * si.cost_price), 0)::bigint
+`;
+const returnCogsJoin = `
+  FROM return_items ri
+  JOIN returns r ON r.id = ri.return_id
+  LEFT JOIN sale_items si ON si.id = ri.sale_item_id
+`;
+
 // =========================================================
 // Ringkasan penjualan per hari
 // =========================================================
@@ -219,6 +231,152 @@ router.get('/gross-profit', async (req, res, next) => {
 });
 
 // =========================================================
+// Laba rugi (Laba Bersih = Laba Kotor setelah retur - Beban Operasional)
+// =========================================================
+// Pembelian stok dan payout penitip BUKAN beban (hanya baris informasi): HPP
+// sudah dikurangkan saat barang terjual, menambahkannya lagi = double counting.
+router.get('/profit-loss', async (req, res, next) => {
+  try {
+    const { from, to } = resolveRange(req.query);
+    const rangeParams = [from, to];
+
+    // Penjualan & HPP (harian + total) hanya untuk transaksi completed.
+    const salesResult = await pool.query(
+      `SELECT s.created_at::date AS date,
+              COALESCE(SUM(si.line_total), 0)::bigint AS revenue,
+              COALESCE(SUM(si.cost_price * si.qty), 0)::bigint AS cogs
+       FROM sale_items si
+       JOIN sales s ON s.id = si.sale_id
+       WHERE s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
+       GROUP BY s.created_at::date`,
+      rangeParams
+    );
+
+    // Retur per hari: refund (kas keluar) dan HPP barang yang kembali ke stok.
+    const returnsResult = await pool.query(
+      `SELECT r.created_at::date AS date,
+              COALESCE(SUM(ri.refund_amount), 0)::bigint AS return_refund,
+              ${RETURN_COGS_EXPR} AS return_cogs
+       ${returnCogsJoin}
+       WHERE r.created_at >= $1::date AND r.created_at < ($2::date + INTERVAL '1 day')
+       GROUP BY r.created_at::date`,
+      rangeParams
+    );
+
+    // Beban operasional per hari (basis akrual: memakai `amount`, bukan `paid_amount`).
+    const expenseResult = await pool.query(
+      `SELECT e.date AS date, COALESCE(SUM(e.amount), 0)::bigint AS expense
+       FROM expenses e
+       WHERE e.date >= $1::date AND e.date <= $2::date
+       GROUP BY e.date`,
+      rangeParams
+    );
+
+    // Beban per kategori (periode).
+    const expenseByCategory = await pool.query(
+      `SELECT COALESCE(ec.name, 'Tanpa Kategori') AS category,
+              COALESCE(SUM(e.amount), 0)::bigint AS amount
+       FROM expenses e
+       LEFT JOIN expense_categories ec ON ec.id = e.expense_category_id
+       WHERE e.date >= $1::date AND e.date <= $2::date
+       GROUP BY COALESCE(ec.name, 'Tanpa Kategori')
+       ORDER BY amount DESC`,
+      rangeParams
+    );
+
+    // Baris informasi (TIDAK mengurangi laba).
+    const purchaseResult = await pool.query(
+      `SELECT COALESCE(SUM(total), 0)::bigint AS purchase_total
+       FROM purchases
+       WHERE status <> 'cancelled' AND date >= $1::date AND date <= $2::date`,
+      rangeParams
+    );
+    const payoutResult = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0)::bigint AS consignment_payout
+       FROM consignment_payouts
+       WHERE created_at >= $1::date AND created_at < ($2::date + INTERVAL '1 day')`,
+      rangeParams
+    );
+
+    const salesMap = new Map(salesResult.rows.map((r) => [toIso(r.date), r]));
+    const returnsMap = new Map(returnsResult.rows.map((r) => [toIso(r.date), r]));
+    const expenseMap = new Map(expenseResult.rows.map((r) => [toIso(r.date), Number(r.expense)]));
+
+    const dates = new Set([...salesMap.keys(), ...returnsMap.keys(), ...expenseMap.keys()]);
+
+    const totals = { revenue: 0, cogs: 0, return_refund: 0, return_cogs: 0, expense: 0 };
+    const rows = [...dates].sort((a, b) => (a < b ? 1 : -1)).map((date) => {
+      const sale = salesMap.get(date);
+      const ret = returnsMap.get(date);
+      const revenue = sale ? Number(sale.revenue) : 0;
+      const cogs = sale ? Number(sale.cogs) : 0;
+      const returnRefund = ret ? Number(ret.return_refund) : 0;
+      const returnCogs = ret ? Number(ret.return_cogs) : 0;
+      const expense = expenseMap.get(date) || 0;
+
+      const grossProfit = revenue - cogs;
+      const grossProfitNet = grossProfit - (returnRefund - returnCogs);
+      const netProfit = grossProfitNet - expense;
+
+      totals.revenue += revenue;
+      totals.cogs += cogs;
+      totals.return_refund += returnRefund;
+      totals.return_cogs += returnCogs;
+      totals.expense += expense;
+
+      return {
+        date,
+        revenue,
+        cogs,
+        gross_profit: grossProfit,
+        return_refund: returnRefund,
+        return_cogs: returnCogs,
+        gross_profit_net: grossProfitNet,
+        expense,
+        net_profit: netProfit,
+      };
+    });
+
+    if (wantsCsv(req.query)) {
+      return sendCsv(res, `laba-rugi-${from}_${to}.csv`, rows, [
+        'date', 'revenue', 'cogs', 'gross_profit', 'return_refund', 'return_cogs',
+        'gross_profit_net', 'expense', 'net_profit',
+      ]);
+    }
+
+    const grossProfit = totals.revenue - totals.cogs;
+    const grossProfitNet = grossProfit - (totals.return_refund - totals.return_cogs);
+    const summary = {
+      revenue: totals.revenue,
+      cogs: totals.cogs,
+      gross_profit: grossProfit,
+      return_refund: totals.return_refund,
+      return_cogs: totals.return_cogs,
+      gross_profit_net: grossProfitNet,
+      operating_expense: totals.expense,
+      net_profit: grossProfitNet - totals.expense,
+    };
+
+    res.json({
+      from,
+      to,
+      summary,
+      expense_by_category: expenseByCategory.rows.map((r) => ({
+        category: r.category,
+        amount: Number(r.amount),
+      })),
+      info: {
+        purchase_total: Number(purchaseResult.rows[0].purchase_total),
+        consignment_payout: Number(payoutResult.rows[0].consignment_payout),
+      },
+      rows,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================
 // Produk terlaris
 // =========================================================
 router.get('/top-products', async (req, res, next) => {
@@ -370,6 +528,38 @@ router.get('/dashboard', async (req, res, next) => {
        WHERE s.status = 'completed' AND s.created_at::date = CURRENT_DATE`
     );
 
+    // Retur hari ini (refund & HPP kembali) agar laba bersih konsisten dengan laporan.
+    const profitTodayReturns = await pool.query(
+      `SELECT COALESCE(SUM(ri.refund_amount), 0)::bigint AS return_refund,
+              ${RETURN_COGS_EXPR} AS return_cogs
+       ${returnCogsJoin}
+       WHERE r.created_at >= CURRENT_DATE AND r.created_at < (CURRENT_DATE + INTERVAL '1 day')`
+    );
+
+    const expenseToday = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0)::bigint AS expense FROM expenses WHERE date = CURRENT_DATE`
+    );
+
+    const expenseMonth = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0)::bigint AS expense
+       FROM expenses WHERE date >= DATE_TRUNC('month', CURRENT_DATE)::date`
+    );
+
+    const profitMonth = await pool.query(
+      `SELECT ${GROSS_PROFIT_EXPR} AS gross_profit
+       FROM sale_items si JOIN sales s ON s.id = si.sale_id
+       WHERE s.status = 'completed' AND s.created_at >= DATE_TRUNC('month', CURRENT_DATE)`
+    );
+
+    // Retur bulan ini agar laba bersih bulanan konsisten dengan hari ini & laporan.
+    const profitMonthReturns = await pool.query(
+      `SELECT COALESCE(SUM(ri.refund_amount), 0)::bigint AS return_refund,
+              ${RETURN_COGS_EXPR} AS return_cogs
+       ${returnCogsJoin}
+       WHERE r.created_at >= DATE_TRUNC('month', CURRENT_DATE)
+         AND r.created_at < (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month')`
+    );
+
     const topProducts = await pool.query(
       `SELECT p.name AS product_name, SUM(si.base_qty)::int AS qty_sold
        FROM sale_items si
@@ -400,10 +590,23 @@ router.get('/dashboard', async (req, res, next) => {
         grand_total: Number(today.rows[0].grand_total),
         tax_total: Number(today.rows[0].tax_total),
         gross_profit: Number(profitToday.rows[0].gross_profit),
+        expense: Number(expenseToday.rows[0].expense),
+        // Laba bersih hari ini = laba kotor - koreksi retur - beban hari ini.
+        net_profit:
+          Number(profitToday.rows[0].gross_profit)
+          - (Number(profitTodayReturns.rows[0].return_refund) - Number(profitTodayReturns.rows[0].return_cogs))
+          - Number(expenseToday.rows[0].expense),
       },
       month: {
         txn_count: month.rows[0].txn_count,
         grand_total: Number(month.rows[0].grand_total),
+        gross_profit: Number(profitMonth.rows[0].gross_profit),
+        expense: Number(expenseMonth.rows[0].expense),
+        // Samakan dengan net_profit harian & /profit-loss: koreksi retur ikut dihitung.
+        net_profit:
+          Number(profitMonth.rows[0].gross_profit)
+          - (Number(profitMonthReturns.rows[0].return_refund) - Number(profitMonthReturns.rows[0].return_cogs))
+          - Number(expenseMonth.rows[0].expense),
       },
       top_products: topProducts.rows,
       low_stock_count: lowStock.rows[0].n,

@@ -526,6 +526,48 @@ WHERE p.stock_qty > 0
   AND NOT EXISTS (SELECT 1 FROM stock_batches b WHERE b.product_id = p.id);
 
 -- =========================================================
+-- P4: Beban operasional (Laba Rugi)
+-- =========================================================
+-- Pembelian stok TIDAK dicatat di sini: membeli stok mengubah kas -> persediaan
+-- (aset), bukan beban. HPP sudah dikurangkan otomatis saat barang terjual.
+-- Beban operasional yang benar: gaji, sewa, listrik/air/internet, kemasan, dst.
+CREATE TABLE IF NOT EXISTS expense_categories (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Nomor dokumen EXP-YYYYMMDD-NNNN via nextDocNumber(client, 'EXP').
+-- `amount` adalah nilai beban yang diakui (basis akrual); `paid_amount` hanya
+-- untuk pelacakan kas. Laba rugi memakai `amount`, bukan `paid_amount`.
+CREATE TABLE IF NOT EXISTS expenses (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(40) UNIQUE NOT NULL,
+    expense_category_id INTEGER REFERENCES expense_categories(id),
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    amount BIGINT NOT NULL CHECK (amount > 0),
+    payment_status VARCHAR(10) NOT NULL DEFAULT 'paid'
+        CHECK (payment_status IN ('unpaid', 'paid')),
+    paid_amount BIGINT NOT NULL DEFAULT 0,
+    method VARCHAR(20),
+    note TEXT,
+    user_id INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Seed kategori beban awal (idempotent).
+INSERT INTO expense_categories (name) VALUES
+    ('Gaji'),
+    ('Sewa'),
+    ('Listrik & Air'),
+    ('Internet & Telepon'),
+    ('Kemasan'),
+    ('Transport'),
+    ('Lain-lain')
+ON CONFLICT (name) DO NOTHING;
+
+-- =========================================================
 -- Indeks
 -- =========================================================
 CREATE INDEX IF NOT EXISTS idx_products_barcode ON products (barcode);
@@ -565,3 +607,11 @@ CREATE INDEX IF NOT EXISTS idx_stock_batches_product_fefo
 CREATE INDEX IF NOT EXISTS idx_stock_batches_expiry ON stock_batches (expiry_date);
 CREATE INDEX IF NOT EXISTS idx_sale_item_batches_item ON sale_item_batches (sale_item_id);
 CREATE INDEX IF NOT EXISTS idx_sale_item_batches_batch ON sale_item_batches (batch_id);
+-- P4: beban operasional
+CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses (date);
+CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses (expense_category_id, date);
+-- P4: dukungan report laba rugi (retur, pembelian, payout)
+CREATE INDEX IF NOT EXISTS idx_returns_created_at ON returns (created_at);
+CREATE INDEX IF NOT EXISTS idx_return_items_return ON return_items (return_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases (date);
+CREATE INDEX IF NOT EXISTS idx_consignment_payouts_created ON consignment_payouts (created_at);

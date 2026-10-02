@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Download, BarChart3 } from 'lucide-react';
 import { api, downloadFile } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
@@ -15,6 +15,7 @@ const TABS = [
   { key: 'by-cashier', label: 'Per Kasir' },
   { key: 'by-payment', label: 'Per Metode Bayar' },
   { key: 'gross-profit', label: 'Laba Kotor' },
+  { key: 'profit-loss', label: 'Laba Rugi' },
   { key: 'top-products', label: 'Produk Terlaris' },
   { key: 'low-stock', label: 'Stok Minimum' },
   { key: 'stock-card', label: 'Kartu Stok' },
@@ -25,29 +26,54 @@ const Reports = () => {
   const [tab, setTab] = useState('sales-summary');
   const [range, setRange] = useState({ from: firstOfMonthIso(), to: todayIso() });
   const [data, setData] = useState(null);
+  const [dataTab, setDataTab] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const [products, setProducts] = useState([]);
   const [productId, setProductId] = useState('');
 
+  const requestIdRef = useRef(0);
+  const abortRef = useRef(null);
+
   const load = useCallback(async () => {
+    if (tab === 'stock-card' && !productId) {
+      abortRef.current?.abort();
+      setData(null);
+      setDataTab(null);
+      setLoading(false);
+      return;
+    }
+
+    const requestId = ++requestIdRef.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setData(null);
+    setDataTab(null);
     try {
+      let payload;
       if (tab === 'stock-card') {
-        if (!productId) { setLoading(false); return; }
-        setData(await api.get(`/api/reports/stock-card/${productId}`, { from: range.from, to: range.to }));
+        payload = await api.get(`/api/reports/stock-card/${productId}`, { from: range.from, to: range.to }, { signal: controller.signal });
       } else if (tab === 'low-stock') {
-        setData(await api.get('/api/reports/low-stock'));
+        payload = await api.get('/api/reports/low-stock', undefined, { signal: controller.signal });
       } else {
-        setData(await api.get(`/api/reports/${tab}`, { from: range.from, to: range.to }));
+        payload = await api.get(`/api/reports/${tab}`, { from: range.from, to: range.to }, { signal: controller.signal });
       }
+      if (requestId !== requestIdRef.current) return;
+      setData(payload);
+      setDataTab(tab);
     } catch (err) {
+      if (controller.signal.aborted) return;
+      if (requestId !== requestIdRef.current) return;
       toast.error(err.message);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   }, [tab, range, productId, toast]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -73,14 +99,15 @@ const Reports = () => {
   };
 
   const renderTable = () => {
-    if (!data) return <p className="text-sm text-slate-500 py-8 text-center">Tidak ada data</p>;
+    if (!data || dataTab !== tab) return <p className="text-sm text-slate-500 py-8 text-center">Tidak ada data</p>;
 
     if (tab === 'sales-summary') {
+      if (!data.totals) return <p className="text-sm text-slate-500 py-8 text-center">Data tidak tersedia</p>;
       return (
         <>
           <div className="grid grid-cols-4 gap-3 mb-4">
             {[
-              { label: 'Total Transaksi', value: data.totals.txn_count },
+              { label: 'Total Transaksi', value: data.totals.txn_count ?? 0 },
               { label: 'Penjualan', value: formatCurrency(data.totals.grand_total) },
               { label: 'PPN (incl.)', value: formatCurrency(data.totals.tax_total) },
               { label: 'Retur', value: formatCurrency(data.totals.refund_total) },
@@ -161,13 +188,14 @@ const Reports = () => {
     }
 
     if (tab === 'gross-profit') {
+      if (!data.summary) return <p className="text-sm text-slate-500 py-8 text-center">Data tidak tersedia</p>;
       return (
         <>
           <div className="grid grid-cols-3 gap-3 mb-4">
             {[
-              { label: 'Pendapatan', value: formatCurrency(data.summary.revenue) },
-              { label: 'HPP', value: formatCurrency(data.summary.cogs) },
-              { label: 'Laba Kotor', value: formatCurrency(data.summary.gross_profit) },
+              { label: 'Pendapatan', value: formatCurrency(data.summary?.revenue ?? 0) },
+              { label: 'HPP', value: formatCurrency(data.summary?.cogs ?? 0) },
+              { label: 'Laba Kotor', value: formatCurrency(data.summary?.gross_profit ?? 0) },
             ].map((kpi) => (
               <div key={kpi.label} className="p-3 bg-white/5 rounded-ios-sm">
                 <div className="text-xs text-slate-400">{kpi.label}</div>
@@ -189,6 +217,90 @@ const Reports = () => {
                 <td className="px-4 py-2 text-right text-slate-300">{formatCurrency(row.revenue)}</td>
                 <td className="px-4 py-2 text-right text-slate-400">{formatCurrency(row.cogs)}</td>
                 <td className="px-4 py-2 text-right text-ios-green font-medium">{formatCurrency(row.gross_profit)}</td>
+              </tr>
+            ))}
+          </Table>
+        </>
+      );
+    }
+
+    if (tab === 'profit-loss') {
+      if (!data.summary) return <p className="text-sm text-slate-500 py-8 text-center">Data tidak tersedia</p>;
+      return (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+            {[
+              { label: 'Penjualan', value: formatCurrency(data.summary?.revenue ?? 0) },
+              { label: 'HPP', value: formatCurrency(data.summary?.cogs ?? 0) },
+              { label: 'Laba Kotor', value: formatCurrency(data.summary?.gross_profit ?? 0) },
+              { label: 'Retur (neto HPP)', value: formatCurrency((data.summary?.return_refund ?? 0) - (data.summary?.return_cogs ?? 0)) },
+              { label: 'Beban Operasional', value: formatCurrency(data.summary?.operating_expense ?? 0) },
+              { label: 'Laba Bersih', value: formatCurrency(data.summary?.net_profit ?? 0), highlight: true },
+            ].map((kpi) => (
+              <div key={kpi.label} className="p-3 bg-white/5 rounded-ios-sm">
+                <div className="text-xs text-slate-400">{kpi.label}</div>
+                <div className={`text-lg font-semibold ${kpi.highlight ? 'text-ios-green' : 'text-white'}`}>{kpi.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+            <div>
+              <h4 className="text-sm font-semibold text-white mb-2">Beban per Kategori</h4>
+              <Table
+                columns={[
+                  { key: 'category', label: 'Kategori' },
+                  { key: 'amount', label: 'Jumlah', align: 'right' },
+                ]}
+                empty="Belum ada beban pada periode ini"
+              >
+                {(data.expense_by_category || []).map((row) => (
+                  <tr key={row.category} className="hover:bg-white/5">
+                    <td className="px-4 py-2 text-white">{row.category}</td>
+                    <td className="px-4 py-2 text-right text-ios-orange font-medium">{formatCurrency(row.amount)}</td>
+                  </tr>
+                ))}
+              </Table>
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-white mb-2">Informasi (tidak mengurangi laba)</h4>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm">
+                  <span className="text-sm text-slate-300">Pembelian Stok</span>
+                  <span className="text-white">{formatCurrency(data.info?.purchase_total ?? 0)}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm">
+                  <span className="text-sm text-slate-300">Payout Penitip (Konsinyasi)</span>
+                  <span className="text-white">{formatCurrency(data.info?.consignment_payout ?? 0)}</span>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Pembelian stok mengubah kas menjadi persediaan (aset), bukan beban. HPP sudah otomatis
+                  dikurangkan saat barang terjual, sehingga tidak dihitung ulang.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <Table
+            columns={[
+              { key: 'date', label: 'Tanggal' },
+              { key: 'revenue', label: 'Penjualan', align: 'right' },
+              { key: 'cogs', label: 'HPP', align: 'right' },
+              { key: 'gross', label: 'Laba Kotor', align: 'right' },
+              { key: 'expense', label: 'Beban', align: 'right' },
+              { key: 'net', label: 'Laba Bersih', align: 'right' },
+            ]}
+          >
+            {data.rows.map((row) => (
+              <tr key={row.date} className="hover:bg-white/5">
+                <td className="px-4 py-2 text-white">{formatDate(row.date)}</td>
+                <td className="px-4 py-2 text-right text-slate-300">{formatCurrency(row.revenue)}</td>
+                <td className="px-4 py-2 text-right text-slate-400">{formatCurrency(row.cogs)}</td>
+                <td className="px-4 py-2 text-right text-slate-300">{formatCurrency(row.gross_profit_net)}</td>
+                <td className="px-4 py-2 text-right text-ios-orange">{formatCurrency(row.expense)}</td>
+                <td className={`px-4 py-2 text-right font-medium ${row.net_profit >= 0 ? 'text-ios-green' : 'text-ios-red'}`}>
+                  {formatCurrency(row.net_profit)}
+                </td>
               </tr>
             ))}
           </Table>

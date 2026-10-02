@@ -11,8 +11,11 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import BarcodeScannerModal from '../components/scanner/BarcodeScannerModal';
+import CameraScanButton from '../components/scanner/CameraScanButton';
 import useDebounce from '../hooks/useDebounce';
 import { formatDate, formatCurrency, parseMoney, parseQty, todayIso } from '../utils/formatters';
+import { resolveBarcode } from '../utils/barcode';
 import { PO_STATUS_LABELS } from '../utils/labels';
 
 const PO_TONES = {
@@ -46,6 +49,7 @@ const Purchases = () => {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [cancelConfirm, setCancelConfirm] = useState(null);
+  const [scanOpen, setScanOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,6 +126,41 @@ const Purchases = () => {
       },
     ]);
     setProductSearch('');
+  };
+
+  // Hasil kamera: cari produk dari barcode lalu tambah sebagai baris PO.
+  // Endpoint barcode sudah mengembalikan `matched_unit` (barcode satuan) dan
+  // `units`, jadi tidak perlu permintaan `/units` terpisah — memakai respons
+  // yang sama menjamin satuan/harga konsisten dengan halaman lain.
+  const handleCameraScan = async (code) => {
+    setScanOpen(false);
+    try {
+      const { product, units, matchedUnit } = await resolveBarcode(code);
+      // unit_cost adalah biaya per satuan terpilih; server membagi dengan
+      // conversion_factor untuk HPP basis. Bila satuan cocok bukan basis,
+      // kalikan cost basis agar nilai tetap benar.
+      const factor = matchedUnit ? Number(matchedUnit.conversion_factor) || 1 : 1;
+      const unitCost = matchedUnit
+        ? Math.round(Number(product.cost_price) * factor)
+        : product.cost_price;
+      setLines((prev) => [
+        ...prev,
+        {
+          product_id: product.id,
+          name: product.name,
+          sku: product.sku,
+          unit_id: matchedUnit ? matchedUnit.id : null,
+          unit_name: matchedUnit ? matchedUnit.unit_name : product.base_unit,
+          qty: 1,
+          unit_cost: unitCost,
+          base_unit: product.base_unit,
+          available_units: units,
+        },
+      ]);
+      toast.success(`${product.name} ditambahkan`);
+    } catch (err) {
+      toast.error(err.message);
+    }
   };
 
   const updateLine = (index, patch) => {
@@ -210,6 +249,17 @@ const Purchases = () => {
       setReceiveOpen(false);
       setDetail(null);
       load();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const openPayment = async (po) => {
+    try {
+      const full = await api.get(`/api/purchases/${po.id}`);
+      setDetail(full);
+      setPaymentAmount('');
+      setPaymentOpen(true);
     } catch (err) {
       toast.error(err.message);
     }
@@ -304,7 +354,7 @@ const Purchases = () => {
                       <Button variant="ghost" size="sm" onClick={() => openReceive(po)} title="Terima Sisa"><PackageCheck size={14} className="text-ios-green" /></Button>
                     )}
                     {po.payment_status === 'unpaid' && po.status !== 'cancelled' && (
-                      <Button variant="ghost" size="sm" onClick={() => { setDetail(po); setPaymentOpen(true); }} title="Bayar">
+                      <Button variant="ghost" size="sm" onClick={() => openPayment(po)} title="Bayar">
                         <CreditCard size={14} className="text-ios-blue" />
                       </Button>
                     )}
@@ -346,7 +396,12 @@ const Purchases = () => {
         </div>
 
         <div className="mb-4">
-          <Input label="Tambah Produk" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Cari nama / SKU produk..." />
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Input label="Tambah Produk" value={productSearch} onChange={(e) => setProductSearch(e.target.value)} placeholder="Cari nama / SKU produk..." />
+            </div>
+            <CameraScanButton onClick={() => setScanOpen(true)} label="Kamera" className="mb-0.5" />
+          </div>
           {productSearch && products.length > 0 && (
             <div className="mt-1 max-h-40 overflow-y-auto rounded-ios-sm border border-white/10 bg-slate-950/90">
               {products.map((product) => (
@@ -425,8 +480,14 @@ const Purchases = () => {
         </div>
       </Modal>
 
+      <BarcodeScannerModal
+        isOpen={scanOpen}
+        onClose={() => setScanOpen(false)}
+        onDetect={handleCameraScan}
+      />
+
       <Modal isOpen={Boolean(detail) && !receiveOpen && !paymentOpen} onClose={() => setDetail(null)} title={`PO ${detail?.code || ''}`} size="lg">
-        {detail && (
+        {detail?.items && (
           <>
             <div className="grid grid-cols-3 gap-3 mb-4 text-sm">
               <div className="p-3 bg-white/5 rounded-ios-sm">
@@ -481,7 +542,7 @@ const Purchases = () => {
           </div>
         }
       >
-        {detail && (
+        {detail?.items && (
           <>
             <p className="text-sm text-slate-400 mb-4">
               Masukkan jumlah yang diterima. Stok bertambah dan HPP diperbarui dengan metode rata-rata bergerak.
@@ -541,12 +602,12 @@ const Purchases = () => {
 
       <Modal
         isOpen={paymentOpen}
-        onClose={() => setPaymentOpen(false)}
+        onClose={() => { setPaymentOpen(false); setDetail(null); }}
         title={`Pembayaran PO ${detail?.code || ''}`}
         size="sm"
         footer={
           <div className="flex justify-end gap-2">
-            <Button variant="neutral" onClick={() => setPaymentOpen(false)}>Batal</Button>
+            <Button variant="neutral" onClick={() => { setPaymentOpen(false); setDetail(null); }}>Batal</Button>
             <Button onClick={submitPayment} disabled={!paymentAmount}><CreditCard size={16} /> Bayar</Button>
           </div>
         }
@@ -555,7 +616,7 @@ const Purchases = () => {
           <div className="space-y-4">
             <div className="text-sm text-slate-300">
               Total PO: <span className="text-white font-semibold">{formatCurrency(detail.total)}</span><br />
-              Sisa: <span className="text-ios-orange font-semibold">{formatCurrency(detail.total - detail.paid_amount)}</span>
+              Sisa: <span className="text-ios-orange font-semibold">{formatCurrency(Number(detail.total) - Number(detail.paid_amount))}</span>
             </div>
             <Input label="Jumlah Bayar" type="number" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} autoFocus />
           </div>

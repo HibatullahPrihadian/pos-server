@@ -53,8 +53,19 @@ services:
   frontend:
     build: .
     container_name: pos-minimarket-frontend
+    environment:
+      # Dipakai template nginx untuk redirect HTTP->HTTPS agar konsisten dengan port host.
+      HTTPS_HOST_PORT: ${FRONTEND_HTTPS_HOST_PORT:-9999}
     ports:
       - "${FRONTEND_HOST_PORT:-9998}:80"
+      # HTTPS LAN (wajib untuk kamera HP via getUserMedia / secure context).
+      - "${FRONTEND_HTTPS_HOST_PORT:-9999}:443"
+    volumes:
+      # Sertifikat mkcert (opsional). Seluruh folder dipasang agar Docker membuat
+      # direktori bila kosong; entrypoint image lalu membuat self-signed cert bila
+      # pos.crt/pos.key tidak ada, sehingga container tetap start. Lihat README
+      # untuk izin berkas (kunci privat jangan world-readable).
+      - ./certs:/etc/nginx/certs
     depends_on:
       - backend
     extra_hosts:

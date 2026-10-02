@@ -14,9 +14,12 @@ import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
 import Receipt from '../components/receipt/Receipt';
+import BarcodeScannerModal from '../components/scanner/BarcodeScannerModal';
+import CameraScanButton from '../components/scanner/CameraScanButton';
 import useDebounce from '../hooks/useDebounce';
 import useHotkeys from '../hooks/useHotkeys';
 import { formatCurrency, parseMoney, parseQty } from '../utils/formatters';
+import { resolveBarcode as lookupBarcode } from '../utils/barcode';
 
 const PAY_METHODS = [
   { key: 'cash', label: 'Tunai', icon: Banknote },
@@ -58,6 +61,7 @@ const POS = () => {
   const [receiptSale, setReceiptSale] = useState(null);
   const [receiptChange, setReceiptChange] = useState(0);
   const [unitPicker, setUnitPicker] = useState(null);
+  const [scanOpen, setScanOpen] = useState(false);
 
   const debouncedSearch = useDebounce(search, 300);
   const debouncedMemberSearch = useDebounce(memberSearch, 300);
@@ -172,19 +176,21 @@ const POS = () => {
     [cart, focusBarcode, toast]
   );
 
-  const handleBarcode = async (event) => {
-    if (event.key !== 'Enter') return;
-    const code = barcode.trim();
+  // Resolusi satu kode barcode: produk dulu, lalu paket. Dipakai bersama oleh
+  // scanner USB (tombol Enter) dan kamera, agar perilakunya identik. Pencarian
+  // produk memakai util bersama (resolveBarcode) agar konsisten dengan halaman
+  // lain; fallback paket khusus POS.
+  const handleResolveBarcode = useCallback(async (rawCode) => {
+    const code = String(rawCode || '').trim();
     if (!code) return;
-    setBarcode('');
     try {
-      const result = await api.get(`/api/products/barcode/${encodeURIComponent(code)}`);
-      if (result.matched_unit) {
-        addProduct(result.product, result.matched_unit);
+      const { product, matchedUnit } = await lookupBarcode(code);
+      if (matchedUnit) {
+        addProduct(product, matchedUnit);
       } else {
-        addProduct(result.product);
+        addProduct(product);
       }
-      toast.success(`${result.product.name} ditambahkan`);
+      toast.success(`${product.name} ditambahkan`);
     } catch (err) {
       // Bukan produk: coba sebagai barcode paket.
       try {
@@ -194,7 +200,22 @@ const POS = () => {
         toast.error(err.message);
       }
     }
+  }, [addProduct, addBundleToCart, toast]);
+
+  const handleBarcode = (event) => {
+    if (event.key !== 'Enter') return;
+    const code = barcode.trim();
+    if (!code) return;
+    setBarcode('');
+    handleResolveBarcode(code);
   };
+
+  // Hasil kamera: jalur yang sama dengan USB, lalu fokus kembali ke kolom barcode.
+  const handleCameraScan = useCallback((code) => {
+    handleResolveBarcode(code);
+    setScanOpen(false);
+    focusBarcode();
+  }, [handleResolveBarcode, focusBarcode]);
 
   const selectProduct = async (product) => {
     try {
@@ -345,6 +366,12 @@ const POS = () => {
                   onKeyDown={handleBarcode}
                 />
               </div>
+              <CameraScanButton
+                onClick={() => setScanOpen(true)}
+                label="Kamera"
+                className="shrink-0 px-3"
+                size="lg"
+              />
               <div className="relative flex-1">
                 <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
@@ -637,6 +664,13 @@ const POS = () => {
           </div>
         </Card>
       </div>
+
+      {/* Modal pemindai kamera */}
+      <BarcodeScannerModal
+        isOpen={scanOpen}
+        onClose={() => { setScanOpen(false); focusBarcode(); }}
+        onDetect={handleCameraScan}
+      />
 
       {/* Modal pilih satuan */}
       <Modal isOpen={Boolean(unitPicker)} onClose={() => setUnitPicker(null)} title={unitPicker?.product?.name} size="sm">

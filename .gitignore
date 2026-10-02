@@ -6,3 +6,6 @@ dist
 .DS_Store
 backend/uploads/*
 !backend/uploads/.gitkeep
+certs/
+# Sertifikat CA mkcert untuk dipasang di HP (jangan commit).
+rootCA.pem

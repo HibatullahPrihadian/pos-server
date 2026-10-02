@@ -34,7 +34,7 @@ const parse = async (res) => {
   }
 };
 
-export const request = async (method, path, { body, params, isForm } = {}) => {
+export const request = async (method, path, { body, params, isForm, signal } = {}) => {
   const headers = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -44,6 +44,7 @@ export const request = async (method, path, { body, params, isForm } = {}) => {
     method,
     headers,
     body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined,
+    signal,
   });
 
   const data = await parse(res);
@@ -61,7 +62,7 @@ export const request = async (method, path, { body, params, isForm } = {}) => {
 };
 
 export const api = {
-  get: (path, params) => request('GET', path, { params }),
+  get: (path, params, options) => request('GET', path, { params, ...options }),
   post: (path, body) => request('POST', path, { body }),
   put: (path, body) => request('PUT', path, { body }),
   del: (path) => request('DELETE', path),

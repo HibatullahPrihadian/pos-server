@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ShoppingCart, Receipt, Package, Tags, Truck, Boxes,
   ClipboardList, ShoppingBag, Users, Clock, BarChart3, UserCog, Settings,
   LogOut, ChevronLeft, ChevronRight, Lock, Store, BadgePercent, PackagePlus,
-  HandCoins, CalendarCheck, LogIn, LogOut as LogOutIcon,
+  HandCoins, CalendarCheck, LogIn, LogOut as LogOutIcon, Wallet,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api/client';
@@ -34,6 +34,7 @@ const MENU = [
       { path: '/stock', name: 'Stok', icon: Boxes, adminOnly: true },
       { path: '/stock-opname', name: 'Opname', icon: ClipboardList, adminOnly: true },
       { path: '/purchases', name: 'Pembelian', icon: ShoppingBag, adminOnly: true },
+      { path: '/expenses', name: 'Operasional', icon: Wallet, adminOnly: true },
     ],
   },
   {

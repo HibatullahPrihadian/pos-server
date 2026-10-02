@@ -10,7 +10,8 @@ Referensi pola arsitektur: `/Users/ibet/Documents/Antigravity/Tracker` (React + 
 
 **Kasir & Penjualan**
 - Login role **admin** & **kasir** (bcrypt + JWT)
-- Scan barcode (scanner USB = input keyboard) & pencarian produk
+- Scan barcode via **scanner USB** (input keyboard) atau **kamera HP** (butuh HTTPS, lihat §4)
+- Pencarian produk
 - Multi-satuan per produk (pcs/dus/karton) dengan faktor konversi
 - Diskon manual per item & per transaksi
 - Harga khusus member + poin (earn & redeem)
@@ -53,7 +54,7 @@ pos-server/
 ├── docker-compose.yml       # postgres + backend + frontend
 ├── .env.example             # POSTGRES_*, JWT_SECRET, CORS_ORIGIN, port host
 ├── Dockerfile               # FE multi-stage: node build -> nginx
-├── nginx.conf               # serve SPA + proxy /api & /uploads -> backend:5000
+├── nginx/                   # template + entrypoint nginx (TLS, proxy /api & /uploads)
 ├── package.json             # FE (vite react)
 ├── vite.config.js           # dev server 3000, proxy /api -> localhost:5000
 ├── tailwind.config.js
@@ -112,7 +113,83 @@ Akses:
 - Dari perangkat lain di LAN: `http://<IP-LAN>:9998`
 
 **Port default** (dapat diubah di `.env`; default digeser agar tidak bentrok dengan project lain):
-`FRONTEND_HOST_PORT=9998`, `BACKEND_HOST_PORT=5002`, `POSTGRES_HOST_PORT=5433`.
+`FRONTEND_HOST_PORT=9998`, `FRONTEND_HTTPS_HOST_PORT=9999`, `BACKEND_HOST_PORT=5002`, `POSTGRES_HOST_PORT=5433`.
+
+### HTTPS untuk kamera (wajib untuk scan via HP)
+
+Fitur scan barcode memakai kamera perangkat (`getUserMedia`). Browser **hanya**
+memberi akses kamera pada *secure context*: `https://` atau `localhost`. Karena
+itu deploy menyediakan dua port:
+
+- `http://<IP-LAN>:9998` — **dialihkan** (301) ke HTTPS.
+- `https://<IP-LAN>:9999` — dipakai HP dan komputer kasir. **Selalu pakai alamat ini.**
+
+Port tujuan redirect mengikuti `FRONTEND_HTTPS_HOST_PORT` (diteruskan ke
+container sebagai `HTTPS_HOST_PORT`), jadi mengubah port tidak perlu mengedit
+nginx.
+
+Sertifikat dibuat sekali di host dengan [mkcert](https://github.com/FiloSottile/mkcert):
+
+```bash
+brew install mkcert        # macOS (Linux: lihat README mkcert)
+sudo mkcert -install       # pasang CA lokal di trust store host (butuh sudo)
+mkcert -cert-file certs/pos.crt -key-file certs/pos.key <IP-LAN> localhost 127.0.0.1
+```
+
+Ganti `<IP-LAN>` dengan IP host (mis. `192.168.1.9`). File disimpan sebagai
+`certs/pos.crt` dan `certs/pos.key` (nama ini tetap, sesuai template nginx
+`nginx/templates/default.conf.template`) dan di-mount per berkas ke container.
+Folder `certs/` sudah masuk `.gitignore` — **jangan commit kunci privat**.
+
+Atur izin berkas: worker nginx berjalan sebagai user `nginx` (non-root) di
+dalam container, sehingga kunci privat harus bisa dibaca olehnya, tetapi
+**jangan** dibuat world-readable. Batasi ke grup `nginx` (GID `101` pada image
+`nginx:stable-alpine`):
+
+```bash
+chmod 600 certs/pos.key
+chmod 644 certs/pos.crt
+# opsional (Linux): samakan grup agar worker nginx bisa membaca kunci.
+sudo chgrp 101 certs/pos.key && chmod 640 certs/pos.key
+```
+
+> Menjalankan container sebagai root menghindari masalah izin, tetapi
+> memperbesar dampak bila nginx disusupi. Jangan `chmod 644` kunci privat —
+> itu membuat kunci terbaca oleh semua proses di host.
+
+> `mkcert -install` butuh `sudo` karena menambah CA ke trust store sistem, dan
+> hanya memengaruhi peringatan di host. **Membuat sertifikat tidak butuh sudo**,
+> jadi bila `sudo` tidak tersedia cukup jalankan `mkcert -cert-file ...` — HP
+> tetap bisa memercayai sertifikat setelah CA dipasang di perangkat (langkah
+> berikut).
+
+> Tanpa sertifikat, container frontend gagal start karena nginx tidak bisa
+> membaca berkas TLS. Buat sertifikat sebelum `docker compose up -d --build`.
+> Perubahan `nginx/templates/default.conf.template` / `docker-compose.yml`
+> butuh rebuild: `docker compose up -d --build frontend`.
+
+**Pasang CA mkcert di tiap HP** (sekali per perangkat). Tanpa ini HP menampilkan
+peringatan sertifikat dan kamera tetap bisa diblokir. Cari lokasi CA:
+
+```bash
+mkcert -CAROOT                              # lokasi CA, mis. ~/Library/Application Support/mkcert
+cp "$(mkcert -CAROOT)/rootCA.pem" .          # salin ke folder project agar mudah dikirim ke HP
+```
+
+> `rootCA.pem` sudah masuk `.gitignore` (sertifikat CA tidak boleh di-commit).
+> Cara mendistribusikannya ke HP: kirim lewat email/AirDrop/WhatsApp ke diri
+> sendiri, atau sajikan sementara lewat server statis, lalu buka di HP.
+
+- **Android**: salin `rootCA.pem` ke perangkat → Settings → Security → Encryption
+  & credentials → Install a certificate → CA certificate → pilih file itu.
+  (Sebagian HP perlu mengunduhnya lewat browser/aplikasi file.)
+- **iOS (Safari)**: buka `rootCA.pem` → Install Profile → Settings → General →
+  VPN & Device Management → instal → lalu **Settings → General → About →
+  Certificate Trust Settings** → aktifkan *full trust* untuk CA tersebut.
+
+Setelah CA terpasang, buka `https://<IP-LAN>:9999` tanpa peringatan. Untuk
+pengembangan di desktop, `http://localhost:3000` sudah dianggap secure context
+sehingga kamera berfungsi tanpa sertifikat.
 
 ### Inisialisasi database
 
@@ -209,7 +286,8 @@ Semua endpoint berprefiks `/api`. Hanya `POST /api/auth/login` yang publik; sisa
 
 | Tombol | Fungsi |
 |---|---|
-| `Enter` di kolom barcode | Tambah produk hasil scan |
+| `Enter` di kolom barcode | Tambah produk hasil scan (scanner USB) |
+| Tombol **Kamera** | Buka pemindai kamera (butuh HTTPS) |
 | `F2` | Fokus ke kolom pencarian |
 | `F4` | Buka dialog pembayaran |
 | `F8` | Pembayaran tunai (isi otomatis total) |
@@ -266,5 +344,6 @@ Uji alur kritis disarankan manual end-to-end: login admin → master data & impo
 - **Single-tenant / 1 toko**; tanpa multi-cabang.
 - **Tanpa mode offline** — bila jaringan LAN putus, kasir tidak dapat bertransaksi.
 - **QRIS statis**: verifikasi pembayaran dilakukan manual oleh kasir; catat referensi pembayaran di `sale_payments.reference`.
+- **Scan kamera**: deteksi memakai `BarcodeDetector` native bila tersedia (Android/Chrome, Edge, desktop), dan fallback `@zxing/browser` untuk peramban tanpa dukungan (terutama iOS Safari). Pustaka fallback di-*code-split* sehingga tidak membebani bundel utama. Hanya berfungsi pada HTTPS/localhost dan setelah CA mkcert dipasang di perangkat (§4). Scanner USB tidak terpengaruh.
 - Integrasi ESC/POS langsung, cash drawer, payment gateway QRIS dinamis (webhook), cetak label barcode, e-commerce, dan akuntansi penuh (jurnal umum, hutang/piutang detail) **di luar cakupan**.
 - HPP memakai moving average; perubahan harga beli tidak mengubah laba periode lampau karena HPP disalin ke `sale_items.cost_price`.

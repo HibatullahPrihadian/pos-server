@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  TrendingUp, Receipt, PiggyBank, AlertTriangle, Clock, ShoppingBag, ArrowRight, CalendarClock,
+  TrendingUp, Receipt, PiggyBank, AlertTriangle, Clock, ShoppingBag, ArrowRight, CalendarClock, Wallet,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
@@ -78,6 +78,20 @@ const Dashboard = () => {
           value={formatCurrency(data.today.gross_profit)}
           sub={`PPN ${formatCurrency(data.today.tax_total)}`}
           tone="purple"
+        />
+        <KPI
+          icon={Wallet}
+          label="Laba Bersih Hari Ini"
+          value={formatCurrency(data.today.net_profit ?? 0)}
+          sub={`Beban ${formatCurrency(data.today.expense ?? 0)}`}
+          tone={(data.today.net_profit ?? 0) >= 0 ? 'green' : 'red'}
+        />
+        <KPI
+          icon={Wallet}
+          label="Laba Bersih Bulan Ini"
+          value={formatCurrency(data.month.net_profit ?? 0)}
+          sub={`Beban ${formatCurrency(data.month.expense ?? 0)}`}
+          tone={(data.month.net_profit ?? 0) >= 0 ? 'blue' : 'red'}
         />
         <KPI
           icon={Receipt}
