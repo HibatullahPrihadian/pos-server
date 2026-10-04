@@ -10,11 +10,14 @@ Referensi pola arsitektur: `/Users/ibet/Documents/Antigravity/Tracker` (React + 
 
 **Kasir & Penjualan**
 - Login role **admin** & **kasir** (bcrypt + JWT)
-- Scan barcode via **scanner USB** (input keyboard) atau **kamera HP** (butuh HTTPS, lihat §4)
-- Pencarian produk
+- Scan barcode via **scanner USB** (input keyboard) atau **kamera HP** (butuh HTTPS, lihat §4) — di POS, Produk, Pembelian, dan Stok
+- Pencarian produk (tata letak POS 1 kolom: bar scan/pencarian di atas, keranjang penuh, ringkasan TOTAL + Bayar *sticky* di bawah)
 - Multi-satuan per produk (pcs/dus/karton) dengan faktor konversi
+- **Multibarcode**: satu produk/satuan boleh punya beberapa barcode
+- **Harga partai bertingkat** (harga grosir per qty) dan **promo periode** otomatis (produk/kategori, jam/hari/tanggal, tipe persen/nominal/harga batch). Server memilih **harga efektif termurah** dari tier/promo/member
 - Diskon manual per item & per transaksi
 - Harga khusus member + poin (earn & redeem)
+- **Paket bundling**: jual satu paket harga tetap, stok tiap komponen berkurang otomatis; ada **generate barcode EAN-13** + **cetak label** barcode paket
 - Pembayaran Tunai / QRIS / Debit / Transfer, termasuk **split payment**
 - QRIS statis toko (gambar diunggah di Pengaturan, konfirmasi manual kasir)
 - Hitung kembalian, cetak struk 58/80mm via `window.print()`
@@ -22,15 +25,21 @@ Referensi pola arsitektur: `/Users/ibet/Documents/Antigravity/Tracker` (React + 
 - Retur per item dari struk; void transaksi hari ini (shift belum ditutup)
 
 **Master & Inventori**
-- Produk (+ foto, satuan, impor/ekspor CSV), Kategori, Supplier, Member
+- Produk (+ foto, satuan, barcode tambahan, harga member, tier harga, impor/ekspor CSV), Kategori, Supplier, Member
 - Stok otomatis berkurang saat jual, **HPP moving average** saat penerimaan
 - Pembelian: PO (draft → dikirim → diterima sebagian/penuh) + pembayaran sederhana
-- Stok opname, penyesuaian manual, kartu stok, peringatan stok minimum
+- **Batch & kadaluarsa (FEFO)**: tiap penerimaan punya tanggal kadaluarsa sendiri; stok dijual dari batch terdekat kadaluarsa lebih dulu, penjualan batch kadaluarsa diblokir, retur/void mengembalikan ke batch asal
+- Stok opname (tanpa harus tutup toko), penyesuaian manual, kartu stok, peringatan stok minimum & akan/sudah kadaluarsa
+- **Konsinyasi**: penitip (consignor), barang titipan, laporan penjualan titipan & hutang ke penitip + pencatatan pembayaran
+
+**Kepegawaian**
+- **Absensi** karyawan: absen masuk/pulang mandiri dari layar, koreksi manual oleh admin, rekap per periode
 
 **Laporan & Administrasi**
-- Dashboard KPI, penjualan harian/periode, per kasir, per metode bayar, laba kotor, produk terlaris, stok minimum, kartu stok
+- Dashboard KPI (termasuk **laba bersih** & **modal**; kartu KPI dapat diklik menuju menu/tab terkait), penjualan harian/periode, per kasir, per metode bayar, **laba kotor**, **laba rugi**, **modal (pembelian lunas)**, produk terlaris, stok minimum, kartu stok
+- **Beban operasional** (gaji, sewa, listrik, dll.) dengan kategori & status bayar; dipakai menghitung **laba bersih**
 - Semua laporan dapat diekspor **CSV**
-- Pengguna, Pengaturan toko (identitas, PPN, struk, QRIS, poin)
+- Pengguna, Pengaturan toko (identitas, PPN, struk, QRIS, poin, ambang peringatan kadaluarsa)
 
 ---
 
@@ -38,8 +47,8 @@ Referensi pola arsitektur: `/Users/ibet/Documents/Antigravity/Tracker` (React + 
 
 | Layer | Teknologi |
 |---|---|
-| Frontend | React 18, Vite 5, React Router 6, Tailwind CSS 3, lucide-react, papaparse |
-| Backend | Node.js 20, Express 4, plain JS (CommonJS), `pg` (raw SQL), bcryptjs, jsonwebtoken, multer |
+| Frontend | React 18, Vite 5, React Router 6, Tailwind CSS 3, lucide-react, papaparse, `@zxing/browser` (fallback scan kamera) |
+| Backend | Node.js 20, Express 4, plain JS (CommonJS), `pg` (raw SQL), bcryptjs, jsonwebtoken, multer, `bwip-js` (render barcode) |
 | Database | PostgreSQL 15 |
 | Deploy | Docker Compose (postgres + backend + frontend nginx) |
 
@@ -52,7 +61,7 @@ Uang disimpan sebagai `BIGINT` rupiah (integer, tanpa desimal). Semua pembulatan
 ```
 pos-server/
 ├── docker-compose.yml       # postgres + backend + frontend
-├── .env.example             # POSTGRES_*, JWT_SECRET, CORS_ORIGIN, port host
+├── .env.example             # POSTGRES_*, JWT_SECRET, CORS_ORIGIN, port host, APP_TIMEZONE
 ├── Dockerfile               # FE multi-stage: node build -> nginx
 ├── nginx/                   # template + entrypoint nginx (TLS, proxy /api & /uploads)
 ├── package.json             # FE (vite react)
@@ -70,10 +79,12 @@ pos-server/
 │   ├── seed.sql             # data contoh (idempotent)
 │   ├── middleware/          # auth.js (JWT + role), error.js
 │   ├── utils/               # money, invoice, csv, pagination, validate,
-│   │                        # stock, pricing, settings, upload, audit
+│   │                        # stock, batches (FEFO), item_pricing, pricing,
+│   │                        # promotions, barcode (EAN-13), settings, upload, audit
 │   ├── routes/              # auth, users, settings, categories, suppliers,
-│   │                        # products, members, stock, purchases, sales,
-│   │                        # returns, shifts, reports
+│   │                        # products, promotions, bundles, consignment,
+│   │                        # attendance, members, stock, purchases, expenses,
+│   │                        # sales, returns, shifts, reports
 │   └── uploads/             # foto produk & QRIS (volume)
 └── src/
     ├── main.jsx, App.jsx, index.css
@@ -83,13 +94,17 @@ pos-server/
     │   ├── layout/          # Sidebar, Topbar, MainLayout
     │   ├── ui/              # Modal, Button, Table, Pagination, Toast,
     │   │                    # ConfirmDialog, Input, Badge, Card, Spinner, PageHeader
+    │   ├── scanner/         # BarcodeScannerModal, CameraScanButton (scan kamera)
+    │   ├── bundles/         # BundleBarcodeTab (daftar & cetak label barcode)
     │   ├── receipt/Receipt.jsx
     │   └── ProtectedRoute.jsx
     ├── pages/               # Login, Dashboard, POS, Transactions, Products,
+    │                        # Promotions, Bundles, Consignment, Attendance,
     │                        # Categories, Suppliers, Stock, StockOpname,
-    │                        # Purchases, Members, Shifts, Reports, Users, Settings
+    │                        # Purchases, Expenses, Members, Shifts, Reports,
+    │                        # Users, Settings
     ├── hooks/               # useApi, useDebounce, useHotkeys, useToast
-    └── utils/               # formatters/{currency,date,index}, labels
+    └── utils/               # formatters/{currency,date,index}, labels, barcode
 ```
 
 ---
@@ -114,6 +129,8 @@ Akses:
 
 **Port default** (dapat diubah di `.env`; default digeser agar tidak bentrok dengan project lain):
 `FRONTEND_HOST_PORT=9998`, `FRONTEND_HTTPS_HOST_PORT=9999`, `BACKEND_HOST_PORT=5002`, `POSTGRES_HOST_PORT=5433`.
+
+`APP_TIMEZONE` (default `Asia/Jakarta`) menentukan zona waktu toko untuk batas "hari ini"/"bulan ini" pada KPI dan laporan.
 
 ### HTTPS untuk kamera (wajib untuk scan via HP)
 
@@ -249,16 +266,23 @@ Buka http://localhost:3000.
 
 1. **Harga jual sudah termasuk PPN.** `tax_total = round(grand_total - grand_total/(1 + tax_rate/100))`; `dpp = grand_total - tax_total`. Pembulatan dilakukan sekali di level transaksi.
 2. **Multi-satuan**: stok selalu disimpan dalam satuan dasar; jual 1 dus = kurangi `conversion_factor` satuan dasar.
-3. **Harga member**: bila transaksi memakai member dan `member_price` terisi, harga itu yang dipakai (fallback ke `sell_price`), termasuk di level satuan.
-4. **HPP moving average**: `new_cost = round((stock_qty*old_cost + received_qty*unit_cost) / (stock_qty+received_qty))` saat penerimaan. `sale_items.cost_price` menyalin HPP saat transaksi agar laba historis tidak berubah.
-5. **Laba kotor** = `sum(line_total) - sum(qty * cost_price)`.
-6. **Poin**: `earn = floor((total setelah diskon) / point_earn_per_amount)`; redeem 1 poin = `point_value_rupiah`, minimal `point_min_redeem`.
-7. **Stok tidak boleh negatif** (kecuali `allow_negative_stock` diaktifkan di Pengaturan).
-8. **Atomicitas**: semua operasi pengubah stok memakai `BEGIN/COMMIT` + `SELECT ... FOR UPDATE` pada baris produk.
-9. **Void**: hanya transaksi hari ini dengan shift belum ditutup; stok dikembalikan, poin disesuaikan, tercatat di `audit_logs`.
-10. **Retur**: qty ≤ `qty - returned_qty`; stok bertambah dengan HPP asli.
-11. **Nomor dokumen** (`INV-YYYYMMDD-NNNN`, `RET-`, `PO-`, `OPN-`) dibuat di server di dalam transaksi via counter harian, sehingga tidak duplikat.
-12. Checkout **menghitung ulang semua harga/total di server**; total dari klien tidak dipercaya.
+3. **Harga efektif (otomatis termurah)**: untuk tiap item, server memilih harga terendah yang berlaku dari kombinasi **tier qty**, **promo aktif**, **harga member**, dan **harga normal**. Diskon manual kasir ditambahkan di atas harga efektif (di-*clamp* agar total tidak negatif). Harga promo/tier/member hanya menurunkan, tidak menaikkan.
+4. **Harga member**: bila transaksi memakai member dan `member_price` terisi, harga itu berlaku (fallback ke `sell_price`), termasuk di level satuan.
+5. **Promo periode**: berlaku bila tanggal, hari, dan jam cocok; promo bertumpuk diambil yang memberi harga efektif termurah. Asal harga dicatat di `sale_items.promo_id`/`tier_id`.
+6. **HPP moving average**: `new_cost = round((stock_qty*old_cost + received_qty*unit_cost) / (stock_qty+received_qty))` saat penerimaan. `sale_items.cost_price` menyalin HPP saat transaksi agar laba historis tidak berubah.
+7. **Batch & kadaluarsa (FEFO)**: stok tersimpan per batch (`stock_batches`) dengan `expiry_date` opsional. Penjualan mengalokasikan batch **paling dekat kadaluarsa** lebih dulu (`expiry_date NULLS LAST`); batch yang sudah lewat kadaluarsa **tidak dijual**; alokasi dicatat di `sale_item_batches` agar retur/void mengembalikan ke batch asal.
+8. **Paket bundling**: dijual dengan harga tetap (tanpa tier/promo item); stok tiap komponen berkurang saat terjual, dan retur/void mengembalikan stok tiap komponen.
+9. **Konsinyasi**: barang titipan masuk stok lewat penerimaan; penjualan titipan & hutang ke penitip dihitung dari `cost_price` (harga setor); pembayaran ke penitip dicatat di `consignment_payouts`.
+10. **Laba kotor** = `sum(line_total) - sum(qty * cost_price)`.
+11. **Laba bersih** = laba kotor − koreksi retur − **beban operasional**. Pembelian stok & pembayaran penitip **bukan** beban (mengubah kas menjadi persediaan); HPP sudah dikurangkan saat barang terjual sehingga tidak dihitung ulang (mencegah *double counting*).
+12. **Poin**: `earn = floor((total setelah diskon) / point_earn_per_amount)`; redeem 1 poin = `point_value_rupiah`, minimal `point_min_redeem`.
+13. **Stok tidak boleh negatif** (kecuali `allow_negative_stock` diaktifkan di Pengaturan).
+14. **Atomicitas**: semua operasi pengubah stok memakai `BEGIN/COMMIT` + `SELECT ... FOR UPDATE` pada baris produk.
+15. **Void**: hanya transaksi hari ini dengan shift belum ditutup; stok dikembalikan (termasuk komponen paket & batch), poin disesuaikan, tercatat di `audit_logs`.
+16. **Retur**: qty ≤ `qty - returned_qty`; stok bertambah dengan HPP asli.
+17. **Barcode paket internal**: format **EAN-13** berprefix `200` dengan check digit benar (`backend/utils/barcode.js`), dirender ke SVG memakai `bwip-js` untuk cetak label.
+18. **Nomor dokumen** (`INV-YYYYMMDD-NNNN`, `RET-`, `PO-`, `OPN-`, `EXP-`) dibuat di server di dalam transaksi via counter harian, sehingga tidak duplikat.
+19. Checkout **menghitung ulang semua harga/total di server**; total dari klien tidak dipercaya.
 
 ---
 
@@ -269,14 +293,19 @@ Semua endpoint berprefiks `/api`. Hanya `POST /api/auth/login` yang publik; sisa
 - **Auth**: `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password`
 - **Users** (admin): `GET/POST /users`, `PUT /users/:id`, `PUT /users/:id/deactivate`
 - **Categories / Suppliers**: CRUD
-- **Products**: `GET /products`, `GET /products/barcode/:barcode`, `GET /products/:id`, `POST/PUT/DELETE`, `POST /products/import`, `GET /products/export`, `POST /products/:id/image`, `GET/POST/DELETE /products/:id/units`
+- **Products**: `GET /products`, `GET /products/barcode/:barcode`, `GET /products/:id`, `POST/PUT/DELETE`, `POST /products/import`, `GET /products/export`, `POST /products/:id/image`, `GET/POST/DELETE /products/:id/units`, `GET/POST/DELETE /products/:id/barcodes`, `GET/POST/DELETE /products/:id/tiers`, `POST /products/quote`
+- **Promotions** (admin): `GET/POST /promotions`, `GET/PUT/DELETE /promotions/:id`
+- **Bundles**: `GET /bundles`, `GET/POST/PUT/DELETE /bundles/:id`, `GET/PUT /bundles/:id/items`, `GET /bundles/barcode/:barcode`, `GET /bundles/barcode/generate` (admin), `GET /bundles/:id/barcode.svg` (admin), `POST /bundles/barcodes/render` (admin)
+- **Consignment**: CRUD `/consignment/consignors`, `GET /consignment/products`, `GET /consignment/sales`, `GET /consignment/payables`, `GET/POST /consignment/payouts`
+- **Attendance**: `POST /attendance/check-in`, `POST /attendance/check-out`, `GET /attendance/me`, `GET /attendance` (admin), `GET /attendance/summary` (admin), `POST /attendance/manual` (admin)
 - **Members**: CRUD, `GET /members/:id/points`, `POST /members/:id/points/adjust`
-- **Stock**: `GET /stock/movements`, `GET /stock/low`, `POST /stock/adjustments`, `GET/POST /stock/opnames`, `GET /stock/opnames/:id`, `PUT /stock/opnames/:id/items`, `POST /stock/opnames/:id/post`
+- **Stock**: `GET /stock/movements`, `GET /stock/low`, `GET /stock/batches`, `GET /stock/expiring`, `PUT /stock/batches/:id`, `POST /stock/adjustments`, `GET/POST /stock/opnames`, `GET /stock/opnames/:id`, `PUT /stock/opnames/:id/items`, `POST /stock/opnames/:id/post`
 - **Purchases**: `GET/POST /purchases`, `GET/PUT /purchases/:id`, `POST /purchases/:id/receive`, `POST /purchases/:id/payment`, `POST /purchases/:id/cancel`
+- **Expenses**: `GET/POST/PUT/DELETE /expenses`, `GET /expenses/:id`, `POST /expenses/:id/payment`, `GET/POST/PUT/DELETE /expenses/categories`
 - **Sales**: `POST /sales`, `GET /sales`, `GET /sales/:id`, `GET /sales/by-invoice/:invoiceNo`, `POST /sales/:id/void`
 - **Returns**: `POST /returns`, `GET /returns`, `GET /returns/:id`
 - **Shifts**: `GET /shifts/current`, `POST /shifts/open`, `POST /shifts/close`, `GET /shifts`, `GET /shifts/:id/summary`
-- **Reports** (semua mendukung `?format=csv`): `/reports/sales-summary`, `/reports/by-cashier`, `/reports/by-payment`, `/reports/gross-profit`, `/reports/top-products`, `/reports/low-stock`, `/reports/stock-card/:productId`, `/reports/dashboard`
+- **Reports** (semua mendukung `?format=csv`): `/reports/sales-summary`, `/reports/by-cashier`, `/reports/by-payment`, `/reports/gross-profit`, `/reports/profit-loss`, `/reports/purchase-paid`, `/reports/top-products`, `/reports/low-stock`, `/reports/stock-card/:productId`, `/reports/dashboard`
 - **Settings**: `GET/PUT /settings`, `POST /settings/qris-image`
 - **Health**: `GET /api/health`
 
@@ -293,16 +322,24 @@ Semua endpoint berprefiks `/api`. Hanya `POST /api/auth/login` yang publik; sisa
 | `F8` | Pembayaran tunai (isi otomatis total) |
 | `Esc` | Tutup dialog yang aktif |
 
+Layar kasir memakai tata letak **1 kolom**: bar scan + kamera + pencarian di atas, daftar item keranjang (satu baris per item) di tengah, dan ringkasan **TOTAL + Bayar** yang menempel di bawah. Mengetik di pencarian memunculkan dropdown hasil (produk & paket); diskon item tersembunyi di balik ikon pada tiap baris.
+
 ---
 
-## 9. Cetak struk
+## 9. Cetak struk & label barcode
 
-Struk memakai `window.print()` dengan CSS khusus (`.receipt-paper`, 58mm/80mm) di `src/index.css`.
+**Struk** memakai `window.print()` dengan CSS khusus (`.receipt-paper`, 58mm/80mm) di `src/index.css`.
 Hanya area `#receipt-print-area` yang tercetak.
 
 - Atur lebar kertas printer (58mm/80mm) dan margin ke 0 di driver printer OS.
 - Matikan header/footer browser saat mencetak.
 - Integrasi ESC/POS langsung dan cash drawer tidak termasuk cakupan MVP.
+
+**Label barcode paket** (menu Paket → tab **Barcode**): pilih paket lalu cetak label.
+Gambar barcode dirender server-side sebagai SVG (`GET /api/bundles/:id/barcode.svg` atau
+`POST /api/bundles/barcodes/render` untuk massal) dan dicetak lewat `window.print()` dengan
+CSS label (`.barcode-label`, default 40×30mm). Hanya area `#barcode-print-area` yang tercetak.
+Isi label: barcode + nama paket + harga + kode. Cek kalibrasi ukuran label dengan printer Anda.
 
 ---
 
@@ -335,7 +372,7 @@ npm run build     # build produksi FE
 cd backend && npm run check   # cek sintaks backend
 ```
 
-Uji alur kritis disarankan manual end-to-end: login admin → master data & impor CSV → PO & penerimaan (cek HPP) → buka shift → jual multi-satuan + diskon + split payment + member/poin → cetak struk → retur → void → tutup shift (cek selisih) → cek semua laporan & ekspor CSV → uji role kasir (403).
+Uji alur kritis disarankan manual end-to-end: login admin → master data & impor CSV → atur tier/promo/paket → PO & penerimaan (cek HPP + batch/kadaluarsa) → buka shift → jual multi-satuan + diskon + split payment + member/poin → cetak struk → retur → void → absensi → konsinyasi (terima → jual → payout) → catat beban operasional → tutup shift (cek selisih) → cek semua laporan (termasuk Laba Rugi & Modal) & ekspor CSV → generate + cetak label barcode paket → uji role kasir (403).
 
 ---
 
@@ -344,6 +381,8 @@ Uji alur kritis disarankan manual end-to-end: login admin → master data & impo
 - **Single-tenant / 1 toko**; tanpa multi-cabang.
 - **Tanpa mode offline** — bila jaringan LAN putus, kasir tidak dapat bertransaksi.
 - **QRIS statis**: verifikasi pembayaran dilakukan manual oleh kasir; catat referensi pembayaran di `sale_payments.reference`.
-- **Scan kamera**: deteksi memakai `BarcodeDetector` native bila tersedia (Android/Chrome, Edge, desktop), dan fallback `@zxing/browser` untuk peramban tanpa dukungan (terutama iOS Safari). Pustaka fallback di-*code-split* sehingga tidak membebani bundel utama. Hanya berfungsi pada HTTPS/localhost dan setelah CA mkcert dipasang di perangkat (§4). Scanner USB tidak terpengaruh.
-- Integrasi ESC/POS langsung, cash drawer, payment gateway QRIS dinamis (webhook), cetak label barcode, e-commerce, dan akuntansi penuh (jurnal umum, hutang/piutang detail) **di luar cakupan**.
+- **Scan kamera**: deteksi memakai `BarcodeDetector` native bila tersedia (Android/Chrome, Edge, desktop), dan fallback `@zxing/browser` untuk peramban tanpa dukungan (terutama iOS Safari). Pustaka fallback di-*code-split* sehingga tidak membebani bundel utama. Hanya berfungsi pada HTTPS/localhost dan setelah CA mkcert dipasang di perangkat (§4). Scanner USB tidak terpengaruh. Tombol kamera otomatis nonaktif pada konteks non-secure.
+- **Kadaluarsa/FEFO**: batch tanpa tanggal (`expiry_date NULL`) dialokasikan paling akhir; stok lama saat migrasi dibuatkan satu batch `legacy`. Pembelian barang **bukan** beban laba (HPP dikurangkan saat terjual).
+- **Akuntansi penuh** (jurnal umum, buku besar, hutang/piutang detail) di luar cakupan; laba bersih dihitung dari laba kotor − beban operasional, bukan jurnal.
+- Integrasi ESC/POS langsung, cash drawer, dan payment gateway QRIS dinamis (webhook) **di luar cakupan**.
 - HPP memakai moving average; perubahan harga beli tidak mengubah laba periode lampau karena HPP disalin ke `sale_items.cost_price`.
