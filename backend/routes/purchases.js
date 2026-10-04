@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
@@ -125,7 +125,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin'), async (req, res, next) => {
+router.post('/', requirePermission('purchase.manage'), async (req, res, next) => {
   try {
     const supplierId = toInt(req.body?.supplier_id, 0) || null;
     const invoiceNo = cleanString(req.body?.invoice_no, 80);
@@ -163,7 +163,7 @@ router.post('/', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requirePermission('purchase.manage'), async (req, res, next) => {
   try {
     const existing = await pool.query('SELECT * FROM purchases WHERE id = $1', [req.params.id]);
     if (!existing.rows[0]) throw new HttpError(404, 'Pembelian tidak ditemukan');
@@ -210,7 +210,7 @@ router.put('/:id', requireRole('admin'), async (req, res, next) => {
 
 // Penerimaan barang: tambah stok + update HPP moving average.
 // items: [{ purchase_item_id, received_qty }]; bila kosong, terima semua sisa.
-router.post('/:id/receive', requireRole('admin'), async (req, res, next) => {
+router.post('/:id/receive', requirePermission('purchase.manage'), async (req, res, next) => {
   try {
     const settings = await getSettings();
     const allowNegative = settings?.allow_negative_stock === true;
@@ -339,7 +339,7 @@ router.post('/:id/receive', requireRole('admin'), async (req, res, next) => {
 });
 
 // Pembayaran sederhana ke supplier (belum_lunas -> lunas), tanpa ledger hutang penuh.
-router.post('/:id/payment', requireRole('admin'), async (req, res, next) => {
+router.post('/:id/payment', requirePermission('purchase.pay'), async (req, res, next) => {
   try {
     const amount = Math.round(Number(req.body?.amount));
     if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Jumlah bayar tidak valid');
@@ -373,7 +373,7 @@ router.post('/:id/payment', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.post('/:id/cancel', requireRole('admin'), async (req, res, next) => {
+router.post('/:id/cancel', requirePermission('purchase.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(
       `UPDATE purchases SET status = 'cancelled'

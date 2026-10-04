@@ -33,7 +33,8 @@ const formatDuration = (checkIn, checkOut) => {
 
 const Attendance = () => {
   const toast = useToastContext();
-  const { isAdmin, user } = useAuth();
+  const { can, user } = useAuth();
+  const canManage = can('user.manage');
   const [users, setUsers] = useState([]);
   const [userFilter, setUserFilter] = useState('');
   const [range, setRange] = useState({ from: firstOfMonthIso(), to: todayIso() });
@@ -48,15 +49,15 @@ const Attendance = () => {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (isAdmin) {
+    if (canManage) {
       api.get('/api/users', { limit: 200 }).then((r) => setUsers(r.data || r)).catch(() => {});
     }
-  }, [isAdmin]);
+  }, [canManage]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      if (isAdmin) {
+      if (canManage) {
         const [list, sum] = await Promise.all([
           api.get('/api/attendance', { page, limit: 25, user_id: userFilter, from: range.from, to: range.to }),
           api.get('/api/attendance/summary', { from: range.from, to: range.to }),
@@ -73,7 +74,7 @@ const Attendance = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, userFilter, range, isAdmin, toast]);
+  }, [page, userFilter, range, canManage, toast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -142,11 +143,11 @@ const Attendance = () => {
     <div>
       <PageHeader
         title="Absensi Karyawan"
-        subtitle={isAdmin ? 'Rekap kehadiran dan koreksi manual' : 'Riwayat kehadiran Anda'}
-        actions={isAdmin ? <Button onClick={() => openManual(null)}><Plus size={16} /> Input Manual</Button> : null}
+        subtitle={canManage ? 'Rekap kehadiran dan koreksi manual' : 'Riwayat kehadiran Anda'}
+        actions={canManage ? <Button onClick={() => openManual(null)}><Plus size={16} /> Input Manual</Button> : null}
       />
 
-      {!isAdmin && (
+      {!canManage && (
         <Card title="Absensi Hari Ini" className="mb-5">
           <div className="flex flex-wrap items-center gap-3">
             {todayRow?.check_in ? (
@@ -169,7 +170,7 @@ const Attendance = () => {
         </Card>
       )}
 
-      {isAdmin && (
+      {canManage && (
       <Card padded={false} className="mb-5">
         <div className="p-4 flex flex-wrap gap-3 border-b border-white/10 items-end">
           <Input as="select" label="Karyawan" className="w-56" value={userFilter} onChange={(e) => { setUserFilter(e.target.value); setPage(1); }}>
@@ -195,7 +196,7 @@ const Attendance = () => {
             {summary.map((s) => (
               <tr key={s.user_id} className="hover:bg-white/5">
                 <td className="px-4 py-3 text-white">{s.user_name}</td>
-                <td className="px-4 py-3 text-slate-400">{s.role === 'admin' ? 'Admin' : 'Kasir'}</td>
+                <td className="px-4 py-3 text-slate-400">{{ admin: 'Admin', kasir: 'Kasir', gudang: 'Gudang' }[s.role] || s.role}</td>
                 <td className="px-4 py-3 text-center text-slate-300">{s.days_present}</td>
                 <td className="px-4 py-3 text-right text-slate-300">{s.worked_hours} jam</td>
                 <td className="px-4 py-3 text-center">
@@ -218,7 +219,7 @@ const Attendance = () => {
               { key: 'out', label: 'Pulang' },
               { key: 'dur', label: 'Durasi' },
               { key: 'note', label: 'Catatan' },
-              ...(isAdmin ? [{ key: 'actions', label: '', align: 'right' }] : []),
+              ...(canManage ? [{ key: 'actions', label: '', align: 'right' }] : []),
             ]}
             loading={loading}
             empty="Belum ada absensi"
@@ -231,7 +232,7 @@ const Attendance = () => {
                 <td className="px-4 py-3 text-slate-400 text-sm">{row.check_out ? formatDateTime(row.check_out) : <Badge tone="orange">Belum</Badge>}</td>
                 <td className="px-4 py-3 text-slate-300">{formatDuration(row.check_in, row.check_out)}</td>
                 <td className="px-4 py-3 text-slate-500 text-xs">{row.note || '-'}</td>
-                {isAdmin && (
+                {canManage && (
                   <td className="px-4 py-3 text-right">
                     <Button variant="ghost" size="sm" onClick={() => openManual(row)}>Koreksi</Button>
                   </td>

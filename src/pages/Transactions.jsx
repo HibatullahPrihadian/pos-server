@@ -19,7 +19,8 @@ import { PAYMENT_LABELS, SALE_STATUS_LABELS } from '../utils/labels';
 
 const Transactions = () => {
   const toast = useToastContext();
-  const { isAdmin } = useAuth();
+  const { can } = useAuth();
+  const canViewAll = can('user.manage');
   const { settings } = useSettings();
 
   const [data, setData] = useState({ data: [], pagination: null });
@@ -63,8 +64,8 @@ const Transactions = () => {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (isAdmin) api.get('/api/users').then(setUsers).catch(() => {});
-  }, [isAdmin]);
+    if (canViewAll) api.get('/api/users').then(setUsers).catch(() => {});
+  }, [canViewAll]);
 
   const openDetail = async (sale) => {
     try {
@@ -178,7 +179,7 @@ const Transactions = () => {
             <option value="completed">Selesai</option>
             <option value="void">Void</option>
           </select>
-          {isAdmin && (
+          {canViewAll && (
             <select
               className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white focus:outline-none focus:border-ios-blue/60"
               value={cashierFilter}

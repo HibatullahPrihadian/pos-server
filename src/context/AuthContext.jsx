@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { api, getToken, setToken } from '../api/client';
 
 const AuthContext = createContext();
@@ -48,13 +48,32 @@ export const AuthProvider = ({ children }) => {
     return data.user;
   };
 
+  const isAdmin = user?.role === 'admin' || user?.is_admin === true;
+
+  // Izin efektif user. Admin selalu semua izin (server juga menegakkan ini).
+  const permissions = useMemo(() => {
+    if (isAdmin) return null; // null = semua; `can` memperlakukannya sebagai true
+    return Array.isArray(user?.permissions) ? user.permissions : [];
+  }, [isAdmin, user]);
+
+  const can = useCallback(
+    (key) => {
+      if (!key) return true;
+      if (isAdmin) return true;
+      return Array.isArray(permissions) && permissions.includes(key);
+    },
+    [isAdmin, permissions]
+  );
+
   const value = {
     user,
     loading,
     login,
     logout,
     refresh,
-    isAdmin: user?.role === 'admin',
+    isAdmin,
+    permissions,
+    can,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

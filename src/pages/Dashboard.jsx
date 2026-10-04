@@ -52,7 +52,7 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue', to }) => {
 
 const Dashboard = () => {
   const toast = useToastContext();
-  const { isAdmin } = useAuth();
+  const { can } = useAuth();
   const [data, setData] = useState(null);
   const [expiring, setExpiring] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -75,8 +75,13 @@ const Dashboard = () => {
 
   const maxTrend = Math.max(...data.trend.map((t) => t.grand_total), 1);
 
-  // Halaman tujuan KPI bersifat admin-only; kasir tetap melihat kartu namun statis.
-  const linkTo = (path) => (isAdmin ? path : undefined);
+  // Halaman tujuan KPI masing-masing punya izinnya sendiri; sembunyikan tautan
+  // bila user tidak punya izin halaman tersebut.
+  const linkTo = (path) => {
+    if (path.startsWith('/reports') && !can('report.view')) return undefined;
+    if (path.startsWith('/stock') && !can('stock.view')) return undefined;
+    return path;
+  };
 
   return (
     <div>

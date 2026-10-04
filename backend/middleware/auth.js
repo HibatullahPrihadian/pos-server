@@ -1,4 +1,6 @@
 const jwt = require('jsonwebtoken');
+const pool = require('../db');
+const { hasPermission } = require('../utils/permissions');
 
 // Nilai contoh yang ikut ter-commit; tidak boleh dipakai di runtime.
 const PLACEHOLDER_SECRETS = new Set([
@@ -19,8 +21,14 @@ const getSecret = () => {
   return secret;
 };
 
-// Verifikasi JWT dan tempelkan payload ke req.user.
-const verifyJwt = (req, res, next) => {
+// Verifikasi JWT lalu muat user dari DB. Izin TIDAK ditaruh di token agar
+// perubahan role/izin (atau penonaktifan akun) langsung berlaku tanpa login
+// ulang. Bila user hilang atau nonaktif -> 401.
+const verifyJwt = async (req, res, next) => {
+  // Beberapa router memasang verifyJwt lagi setelah guard global /api. Bila
+  // user sudah dimuat pada request ini, jangan query DB dua kali.
+  if (req.user) return next();
+
   const header = req.headers.authorization || '';
   const [scheme, token] = header.split(' ');
 
@@ -28,12 +36,33 @@ const verifyJwt = (req, res, next) => {
     return res.status(401).json({ error: 'Token tidak ditemukan' });
   }
 
+  let payload;
   try {
-    const payload = jwt.verify(token, getSecret());
-    req.user = { id: payload.sub, username: payload.username, role: payload.role };
-    return next();
+    payload = jwt.verify(token, getSecret());
   } catch {
     return res.status(401).json({ error: 'Token tidak valid atau kedaluwarsa' });
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT id, username, full_name, role, permissions, is_active FROM users WHERE id = $1',
+      [payload.sub]
+    );
+    const user = result.rows[0];
+    if (!user || !user.is_active) {
+      return res.status(401).json({ error: 'Akun tidak ditemukan atau nonaktif' });
+    }
+    req.user = {
+      id: user.id,
+      username: user.username,
+      full_name: user.full_name,
+      role: user.role,
+      permissions: user.permissions,
+      is_admin: user.role === 'admin',
+    };
+    return next();
+  } catch (err) {
+    return next(err);
   }
 };
 
@@ -48,6 +77,28 @@ const requireRole = (...roles) => (req, res, next) => {
   return next();
 };
 
+// Batasi endpoint berdasarkan izin. Default: cukup salah satu kunci (OR).
+// Pakai requirePermission.all(...) untuk menuntut SEMUA kunci (AND).
+const requirePermission = (...keys) => (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Belum terautentikasi' });
+  }
+  if (!keys.some((key) => hasPermission(req.user, key))) {
+    return res.status(403).json({ error: 'Akses ditolak: izin tidak mencukupi' });
+  }
+  return next();
+};
+
+requirePermission.all = (...keys) => (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Belum terautentikasi' });
+  }
+  if (!keys.every((key) => hasPermission(req.user, key))) {
+    return res.status(403).json({ error: 'Akses ditolak: izin tidak mencukupi' });
+  }
+  return next();
+};
+
 const signToken = (user) =>
   jwt.sign(
     { sub: user.id, username: user.username, role: user.role },
@@ -58,4 +109,4 @@ const signToken = (user) =>
 // Dipanggil saat bootstrap agar konfigurasi salah terdeteksi lebih awal.
 const assertJwtSecret = () => getSecret();
 
-module.exports = { verifyJwt, requireRole, signToken, assertJwtSecret };
+module.exports = { verifyJwt, requireRole, requirePermission, signToken, assertJwtSecret };

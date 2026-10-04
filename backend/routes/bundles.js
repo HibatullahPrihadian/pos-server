@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { verifyJwt, requireRole } = require('../middleware/auth');
+const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { requireString, cleanString, toBool } = require('../utils/validate');
@@ -113,7 +113,7 @@ const loadItems = async (runner, bundleId) => {
 
 // Generate kode EAN-13 internal unik. Harus di atas /barcode/:barcode agar
 // 'generate' tidak dibaca sebagai parameter :barcode.
-router.get('/barcode/generate', requireRole('admin'), async (req, res, next) => {
+router.get('/barcode/generate', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
     let barcode = await nextInternalBarcode(pool, INTERNAL_PREFIX);
     // Antisipasi bentrok (mis. barcode manual) dengan mencoba ulang beberapa kali.
@@ -130,7 +130,7 @@ router.get('/barcode/generate', requireRole('admin'), async (req, res, next) => 
 });
 
 // Render SVG barcode satu paket (berdasarkan barcode tersimpan).
-router.get('/:id/barcode.svg', requireRole('admin'), async (req, res, next) => {
+router.get('/:id/barcode.svg', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
     const id = toInt(req.params.id, 0);
     if (id <= 0) throw new HttpError(404, 'Paket tidak ditemukan');
@@ -148,7 +148,7 @@ router.get('/:id/barcode.svg', requireRole('admin'), async (req, res, next) => {
 });
 
 // Render batch SVG untuk banyak paket sekaligus (cetak label massal).
-router.post('/barcodes/render', requireRole('admin'), async (req, res, next) => {
+router.post('/barcodes/render', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
     const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
     const ids = [...new Set(rawIds.map((id) => toInt(id, 0)).filter((id) => id > 0))];
@@ -222,7 +222,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin'), async (req, res, next) => {
+router.post('/', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
     const sku = requireString(req.body?.sku, 'SKU', 50);
     if (sku.error) throw new HttpError(400, sku.error);
@@ -257,7 +257,7 @@ router.post('/', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
     const existing = await pool.query('SELECT * FROM bundles WHERE id = $1', [req.params.id]);
     if (!existing.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');
@@ -321,7 +321,7 @@ router.put('/:id', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
     const used = await pool.query('SELECT COUNT(*)::int AS n FROM sale_items WHERE bundle_id = $1', [req.params.id]);
     if (used.rows[0].n > 0) {
@@ -354,7 +354,7 @@ router.get('/:id/items', async (req, res, next) => {
   }
 });
 
-router.put('/:id/items', requireRole('admin'), async (req, res, next) => {
+router.put('/:id/items', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
     const bundle = await pool.query('SELECT id FROM bundles WHERE id = $1', [req.params.id]);
     if (!bundle.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');

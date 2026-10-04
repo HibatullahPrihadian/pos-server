@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Eye, CheckCircle2, Search } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
@@ -15,6 +16,8 @@ import { formatDate, formatDateTime } from '../utils/formatters';
 
 const StockOpname = () => {
   const toast = useToastContext();
+  const { can } = useAuth();
+  const canManage = can('stock.manage');
   const [data, setData] = useState({ data: [], pagination: null });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -112,7 +115,7 @@ const StockOpname = () => {
       <PageHeader
         title="Stok Opname"
         subtitle="Hitung fisik stok dan sesuaikan selisih"
-        actions={<Button onClick={() => setCreateOpen(true)}><Plus size={16} /> Opname Baru</Button>}
+        actions={canManage ? <Button onClick={() => setCreateOpen(true)}><Plus size={16} /> Opname Baru</Button> : undefined}
       />
 
       <Card padded={false}>
@@ -130,7 +133,7 @@ const StockOpname = () => {
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => openDetail(row)}><Eye size={14} /></Button>
-                    {row.status === 'draft' && (
+                    {canManage && row.status === 'draft' && (
                       <Button variant="ghost" size="sm" onClick={() => setPostConfirm(row)} title="Posting">
                         <CheckCircle2 size={14} className="text-ios-green" />
                       </Button>
@@ -174,12 +177,14 @@ const StockOpname = () => {
           detail?.status === 'draft' ? (
             <div className="flex justify-between items-center">
               <span className="text-xs text-slate-500">Perubahan hanya diterapkan saat posting.</span>
-              <div className="flex gap-2">
-                <Button variant="neutral" onClick={saveCounts}>Simpan Hitungan</Button>
-                <Button variant="success" onClick={() => setPostConfirm(detail)}>
-                  <CheckCircle2 size={16} /> Posting Opname
-                </Button>
-              </div>
+              {canManage && (
+                <div className="flex gap-2">
+                  <Button variant="neutral" onClick={saveCounts}>Simpan Hitungan</Button>
+                  <Button variant="success" onClick={() => setPostConfirm(detail)}>
+                    <CheckCircle2 size={16} /> Posting Opname
+                  </Button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-right text-sm text-slate-400">

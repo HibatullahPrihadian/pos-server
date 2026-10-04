@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { verifyJwt } = require('../middleware/auth');
+const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
@@ -78,7 +78,7 @@ router.get('/current', async (req, res, next) => {
   }
 });
 
-router.post('/open', async (req, res, next) => {
+router.post('/open', requirePermission('shift.use'), async (req, res, next) => {
   try {
     const openingCash = Math.max(0, Math.round(Number(req.body?.opening_cash) || 0));
     const note = cleanString(req.body?.note, 300);
@@ -104,7 +104,7 @@ router.post('/open', async (req, res, next) => {
   }
 });
 
-router.post('/close', async (req, res, next) => {
+router.post('/close', requirePermission('shift.use'), async (req, res, next) => {
   try {
     const countedCash = Math.max(0, Math.round(Number(req.body?.counted_cash) || 0));
     const note = cleanString(req.body?.note, 300);
@@ -121,7 +121,7 @@ router.post('/close', async (req, res, next) => {
       const shift = result.rows[0];
       if (!shift) throw new HttpError(404, 'Shift terbuka tidak ditemukan');
       if (shift.closed_at) throw new HttpError(400, 'Shift sudah ditutup');
-      if (req.user.role !== 'admin' && shift.user_id !== req.user.id) {
+      if (!req.user.is_admin && shift.user_id !== req.user.id) {
         throw new HttpError(403, 'Shift ini bukan milik Anda');
       }
 

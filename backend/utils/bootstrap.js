@@ -69,6 +69,18 @@ const ensureInitialUsers = async (attempts = 10) => {
       generated,
     });
     if (kasir) created.push(kasir);
+
+    // Akun gudang bersifat opsional: dibuat hanya bila GUDANG_USERNAME diisi.
+    if (process.env.GUDANG_USERNAME) {
+      const gudang = await ensureUser({
+        username: process.env.GUDANG_USERNAME,
+        fullName: process.env.GUDANG_FULL_NAME || 'Petugas Gudang',
+        role: 'gudang',
+        envPassword: process.env.GUDANG_PASSWORD,
+        generated,
+      });
+      if (gudang) created.push(gudang);
+    }
   };
 
   let lastError;

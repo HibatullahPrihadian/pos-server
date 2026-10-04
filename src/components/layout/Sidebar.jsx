@@ -10,60 +10,64 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api/client';
 import { useToastContext } from '../../context/ToastContext';
 
-// Menu dikelompokkan; `adminOnly` menyembunyikan item dari kasir.
+// Menu dikelompokkan; `permission` menyembunyikan item dari user tanpa izin.
 const MENU = [
   {
     section: 'Operasional',
     items: [
-      { path: '/', name: 'Dashboard', icon: LayoutDashboard, adminOnly: true },
-      { path: '/pos', name: 'Kasir', icon: ShoppingCart },
-      { path: '/transactions', name: 'Transaksi', icon: Receipt },
-      { path: '/shifts', name: 'Shift', icon: Clock },
-      { path: '/attendance', name: 'Absensi', icon: CalendarCheck },
+      { path: '/', name: 'Dashboard', icon: LayoutDashboard, permission: 'report.view' },
+      { path: '/pos', name: 'Kasir', icon: ShoppingCart, permission: 'pos.use' },
+      { path: '/transactions', name: 'Transaksi', icon: Receipt, permission: 'pos.use' },
+      { path: '/shifts', name: 'Shift', icon: Clock, permission: 'shift.use' },
+      { path: '/attendance', name: 'Absensi', icon: CalendarCheck, permission: 'attendance.self' },
     ],
   },
   {
     section: 'Inventori',
     items: [
-      { path: '/products', name: 'Produk', icon: Package, adminOnly: true },
-      { path: '/promotions', name: 'Promo', icon: BadgePercent, adminOnly: true },
-      { path: '/bundles', name: 'Paket', icon: PackagePlus, adminOnly: true },
-      { path: '/consignment', name: 'Konsinyasi', icon: HandCoins, adminOnly: true },
-      { path: '/categories', name: 'Kategori', icon: Tags, adminOnly: true },
-      { path: '/suppliers', name: 'Supplier', icon: Truck, adminOnly: true },
-      { path: '/stock', name: 'Stok', icon: Boxes, adminOnly: true },
-      { path: '/stock-opname', name: 'Opname', icon: ClipboardList, adminOnly: true },
-      { path: '/purchases', name: 'Pembelian', icon: ShoppingBag, adminOnly: true },
-      { path: '/expenses', name: 'Operasional', icon: Wallet, adminOnly: true },
+      { path: '/products', name: 'Produk', icon: Package, permission: 'product.view' },
+      { path: '/promotions', name: 'Promo', icon: BadgePercent, permission: 'promotion.manage' },
+      { path: '/bundles', name: 'Paket', icon: PackagePlus, permission: 'bundle.manage' },
+      { path: '/consignment', name: 'Konsinyasi', icon: HandCoins, permission: 'consignment.manage' },
+      { path: '/categories', name: 'Kategori', icon: Tags, permission: 'product.view' },
+      { path: '/suppliers', name: 'Supplier', icon: Truck, permission: 'product.view' },
+      { path: '/stock', name: 'Stok', icon: Boxes, permission: 'stock.view' },
+      { path: '/stock-opname', name: 'Opname', icon: ClipboardList, permission: 'stock.view' },
+      { path: '/purchases', name: 'Pembelian', icon: ShoppingBag, permission: 'purchase.view' },
+      { path: '/expenses', name: 'Operasional', icon: Wallet, permission: 'expense.manage' },
     ],
   },
   {
     section: 'Pelanggan & Laporan',
     items: [
-      { path: '/members', name: 'Member', icon: Users },
-      { path: '/reports', name: 'Laporan', icon: BarChart3, adminOnly: true },
+      { path: '/members', name: 'Member', icon: Users, permission: 'member.manage' },
+      { path: '/reports', name: 'Laporan', icon: BarChart3, permission: 'report.view' },
     ],
   },
   {
     section: 'Administrasi',
     items: [
-      { path: '/users', name: 'Pengguna', icon: UserCog, adminOnly: true },
-      { path: '/settings', name: 'Pengaturan', icon: Settings, adminOnly: true },
+      { path: '/users', name: 'Pengguna', icon: UserCog, permission: 'user.manage' },
+      { path: '/settings', name: 'Pengaturan', icon: Settings, permission: 'settings.manage' },
     ],
   },
 ];
 
+const ROLE_LABELS = { admin: 'Administrator', kasir: 'Kasir', gudang: 'Gudang' };
+
 const Sidebar = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const { user, isAdmin, logout } = useAuth();
+  const { user, can, logout } = useAuth();
   const toast = useToastContext();
   const navigate = useNavigate();
 
   // Absensi hari ini untuk tombol cepat di sidebar (kasir & admin).
   const [attendance, setAttendance] = useState(null);
   const [attendanceBusy, setAttendanceBusy] = useState(false);
+  const canAbsen = can('attendance.self');
 
   const loadAttendance = useCallback(async () => {
+    if (!canAbsen) return;
     try {
       const rows = await api.get('/api/attendance/me');
       const today = new Date();
@@ -73,7 +77,7 @@ const Sidebar = () => {
     } catch {
       // Diamkan: tombol absen tidak boleh menghalangi navigasi.
     }
-  }, []);
+  }, [canAbsen]);
 
   useEffect(() => { loadAttendance(); }, [loadAttendance]);
 
@@ -130,7 +134,7 @@ const Sidebar = () => {
 
       <nav className="flex-1 px-3 overflow-y-auto pb-4">
         {MENU.map((group) => {
-          const visible = group.items.filter((item) => !item.adminOnly || isAdmin);
+          const visible = group.items.filter((item) => can(item.permission));
           if (visible.length === 0) return null;
 
           return (
@@ -169,13 +173,13 @@ const Sidebar = () => {
           <div className="mb-2 px-2">
             <p className="text-sm font-medium text-white truncate">{user?.full_name}</p>
             <p className="text-xs text-slate-400 flex items-center gap-1">
-              {isAdmin ? 'Administrator' : 'Kasir'} <Lock size={10} />
+              {ROLE_LABELS[user?.role] || 'Kasir'} <Lock size={10} />
             </p>
           </div>
         ) : null}
 
         {/* Absen masuk/pulang cepat. Setelah masuk & belum pulang, tampilkan tombol pulang. */}
-        {attendance?.check_in && !attendance?.check_out ? (
+        {canAbsen && (attendance?.check_in && !attendance?.check_out ? (
           <button
             onClick={handleCheckOut}
             disabled={attendanceBusy}
@@ -201,7 +205,7 @@ const Sidebar = () => {
               <CalendarCheck size={12} /> Absensi hari ini selesai
             </div>
           )
-        )}
+        ))}
 
         <button
           onClick={handleLogout}

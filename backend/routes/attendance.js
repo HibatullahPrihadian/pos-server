@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { verifyJwt, requireRole } = require('../middleware/auth');
+const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
@@ -32,7 +32,7 @@ const findOpenShiftId = async (runner, userId) => {
 // =========================================================
 // Self: check-in / check-out / riwayat
 // =========================================================
-router.post('/check-in', async (req, res, next) => {
+router.post('/check-in', requirePermission('attendance.self'), async (req, res, next) => {
   try {
     const note = cleanString(req.body?.note, 300);
     const shiftId = toInt(req.body?.shift_id, 0) || null;
@@ -84,7 +84,7 @@ router.post('/check-in', async (req, res, next) => {
   }
 });
 
-router.post('/check-out', async (req, res, next) => {
+router.post('/check-out', requirePermission('attendance.self'), async (req, res, next) => {
   try {
     const note = cleanString(req.body?.note, 300);
 
@@ -115,7 +115,7 @@ router.post('/check-out', async (req, res, next) => {
   }
 });
 
-router.get('/me', async (req, res, next) => {
+router.get('/me', requirePermission('attendance.self'), async (req, res, next) => {
   try {
     const from = cleanString(req.query.from, 10);
     const to = cleanString(req.query.to, 10);
@@ -144,7 +144,7 @@ router.get('/me', async (req, res, next) => {
 // =========================================================
 // Admin: daftar, rekap, koreksi manual
 // =========================================================
-router.get('/', requireRole('admin'), async (req, res, next) => {
+router.get('/', requirePermission('user.manage'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query);
     const userId = toInt(req.query.user_id, 0);
@@ -181,7 +181,7 @@ router.get('/', requireRole('admin'), async (req, res, next) => {
 });
 
 // Rekap per karyawan pada periode (hari hadir, total jam kerja).
-router.get('/summary', requireRole('admin'), async (req, res, next) => {
+router.get('/summary', requirePermission('user.manage'), async (req, res, next) => {
   try {
     const from = isValidDate(req.query.from) ? req.query.from : null;
     const to = isValidDate(req.query.to) ? req.query.to : null;
@@ -225,7 +225,7 @@ router.get('/summary', requireRole('admin'), async (req, res, next) => {
 });
 
 // Input/koreksi manual oleh admin (upsert per user + tanggal).
-router.post('/manual', requireRole('admin'), async (req, res, next) => {
+router.post('/manual', requirePermission('user.manage'), async (req, res, next) => {
   try {
     const userId = toInt(req.body?.user_id, 0);
     if (userId <= 0) throw new HttpError(400, 'user_id wajib diisi');

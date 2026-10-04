@@ -112,6 +112,18 @@ const assertFeatureSchema = async () => {
     // P4: beban operasional (laba rugi).
     { name: 'tabel expense_categories', sql: "SELECT to_regclass('public.expense_categories') AS ok" },
     { name: 'tabel expenses', sql: "SELECT to_regclass('public.expenses') AS ok" },
+    // P5: role gudang + izin granular per user.
+    {
+      name: 'kolom users.permissions',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'permissions'`,
+    },
+    {
+      name: "CHECK role users (admin/kasir/gudang)",
+      sql: `SELECT COUNT(*)::int AS ok FROM pg_constraint
+            WHERE conname = 'users_role_check'
+              AND pg_get_constraintdef(oid) LIKE '%gudang%'`,
+    },
   ];
 
   for (const check of required) {

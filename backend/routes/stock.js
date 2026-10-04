@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
@@ -166,7 +166,7 @@ router.get('/expiring', async (req, res, next) => {
 });
 
 // Koreksi manual expiry/batch_code (admin).
-router.put('/batches/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/batches/:id', requirePermission('stock.manage'), async (req, res, next) => {
   try {
     const batchId = toInt(req.params.id, 0);
     if (batchId <= 0) throw new HttpError(400, 'ID batch tidak valid');
@@ -209,7 +209,7 @@ router.put('/batches/:id', requireRole('admin'), async (req, res, next) => {
 // =========================================================
 // Penyesuaian stok manual (admin)
 // =========================================================
-router.post('/adjustments', requireRole('admin'), async (req, res, next) => {
+router.post('/adjustments', requirePermission('stock.manage'), async (req, res, next) => {
   try {
     const productId = toInt(req.body?.product_id, 0);
     if (productId <= 0) throw new HttpError(400, 'product_id wajib diisi');
@@ -339,7 +339,7 @@ router.get('/opnames/:id', async (req, res, next) => {
 
 // Buat opname draft. Bila items tidak dikirim, ambil semua produk aktif
 // dengan counted_qty = system_qty (kasir mengisi hitungan fisik menyusul).
-router.post('/opnames', requireRole('admin'), async (req, res, next) => {
+router.post('/opnames', requirePermission('stock.manage'), async (req, res, next) => {
   try {
     const date = cleanString(req.body?.date, 10);
     if (date && !isValidDate(date)) throw new HttpError(400, 'Format tanggal harus YYYY-MM-DD');
@@ -391,7 +391,7 @@ router.post('/opnames', requireRole('admin'), async (req, res, next) => {
 });
 
 // Update item hitungan pada opname draft.
-router.put('/opnames/:id/items', requireRole('admin'), async (req, res, next) => {
+router.put('/opnames/:id/items', requirePermission('stock.manage'), async (req, res, next) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (items.length === 0) throw new HttpError(400, 'items wajib diisi');
@@ -421,7 +421,7 @@ router.put('/opnames/:id/items', requireRole('admin'), async (req, res, next) =>
 });
 
 // Posting opname: terapkan selisih ke stok sebagai mutasi 'opname'.
-router.post('/opnames/:id/post', requireRole('admin'), async (req, res, next) => {
+router.post('/opnames/:id/post', requirePermission('stock.manage'), async (req, res, next) => {
   try {
     const settings = await getSettings();
 

@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const pool = require('../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getSettings } = require('../utils/settings');
 const { imageUpload, uploadRoot, publicPath } = require('../utils/upload');
@@ -35,7 +35,7 @@ router.get('/', async (_req, res, next) => {
   }
 });
 
-router.put('/', requireRole('admin'), async (req, res, next) => {
+router.put('/', requirePermission('settings.manage'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const current = await getSettings();
@@ -99,7 +99,7 @@ router.put('/', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.post('/qris-image', requireRole('admin'), imageUpload.single('image'), async (req, res, next) => {
+router.post('/qris-image', requirePermission('settings.manage'), imageUpload.single('image'), async (req, res, next) => {
   try {
     if (!req.file) throw new HttpError(400, 'File gambar wajib diunggah');
 

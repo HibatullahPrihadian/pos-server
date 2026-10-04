@@ -1,6 +1,6 @@
 const express = require('express');
 const pool = require('../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated } = require('../utils/pagination');
 const { requireString, cleanString, toBool } = require('../utils/validate');
@@ -57,7 +57,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', async (req, res, next) => {
+router.post('/', requirePermission('member.manage'), async (req, res, next) => {
   try {
     const name = requireString(req.body?.name, 'Nama member', 150);
     if (name.error) throw new HttpError(400, name.error);
@@ -77,7 +77,7 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requirePermission('member.manage'), async (req, res, next) => {
   try {
     const name = requireString(req.body?.name, 'Nama member', 150);
     if (name.error) throw new HttpError(400, name.error);
@@ -95,7 +95,7 @@ router.put('/:id', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id', requirePermission('member.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(
       'UPDATE members SET is_active = FALSE WHERE id = $1 RETURNING id',
@@ -124,7 +124,7 @@ router.get('/:id/points', async (req, res, next) => {
 });
 
 // Penyesuaian poin manual (admin). change boleh negatif, saldo tidak boleh minus.
-router.post('/:id/points/adjust', requireRole('admin'), async (req, res, next) => {
+router.post('/:id/points/adjust', requirePermission('member.manage'), async (req, res, next) => {
   try {
     const change = Math.round(Number(req.body?.change));
     if (!Number.isFinite(change) || change === 0) {

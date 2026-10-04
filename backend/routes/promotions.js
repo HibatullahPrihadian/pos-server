@@ -1,6 +1,6 @@
 const express = require('express');
 const pool = require('../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { requireString, cleanString, toBool, isValidDate } = require('../utils/validate');
@@ -144,7 +144,7 @@ const validateScopeTarget = async (v) => {
   }
 };
 
-router.get('/', requireRole('admin'), async (req, res, next) => {
+router.get('/', requirePermission('promotion.manage'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query);
     const activeOnly = toBool(req.query.is_active, false);
@@ -161,7 +161,7 @@ router.get('/', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.get('/:id', requireRole('admin'), async (req, res, next) => {
+router.get('/:id', requirePermission('promotion.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(`${SELECT_PROMO} WHERE pr.id = $1`, [req.params.id]);
     if (!result.rows[0]) throw new HttpError(404, 'Promo tidak ditemukan');
@@ -171,7 +171,7 @@ router.get('/:id', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin'), async (req, res, next) => {
+router.post('/', requirePermission('promotion.manage'), async (req, res, next) => {
   try {
     const { value, error } = validateBody(req.body || {}, { partial: false });
     if (error) throw new HttpError(400, error);
@@ -199,7 +199,7 @@ router.post('/', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requirePermission('promotion.manage'), async (req, res, next) => {
   try {
     const current = await pool.query('SELECT * FROM promotions WHERE id = $1', [req.params.id]);
     if (!current.rows[0]) throw new HttpError(404, 'Promo tidak ditemukan');
@@ -243,7 +243,7 @@ router.put('/:id', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id', requirePermission('promotion.manage'), async (req, res, next) => {
   try {
     const used = await pool.query('SELECT COUNT(*)::int AS n FROM sale_items WHERE promo_id = $1', [req.params.id]);
     if (used.rows[0].n > 0) {

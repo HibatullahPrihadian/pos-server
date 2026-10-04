@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { verifyJwt } = require('../middleware/auth');
+const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
@@ -34,7 +34,7 @@ const SALE_SELECT = `
 // =========================================================
 // Checkout
 // =========================================================
-router.post('/', async (req, res, next) => {
+router.post('/', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const body = req.body || {};
     const shiftId = toInt(body.shift_id, 0);
@@ -66,7 +66,7 @@ router.post('/', async (req, res, next) => {
       const shift = shiftResult.rows[0];
       if (!shift) throw new HttpError(404, 'Shift tidak ditemukan');
       if (shift.closed_at) throw new HttpError(400, 'Shift sudah ditutup');
-      if (req.user.role !== 'admin' && shift.user_id !== req.user.id) {
+      if (!req.user.is_admin && shift.user_id !== req.user.id) {
         throw new HttpError(403, 'Shift ini bukan milik Anda');
       }
 
@@ -577,7 +577,7 @@ router.get('/:id', async (req, res, next) => {
 // =========================================================
 // Void: hanya transaksi hari ini & shift belum ditutup
 // =========================================================
-router.post('/:id/void', async (req, res, next) => {
+router.post('/:id/void', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const reason = cleanString(req.body?.reason, 300) || 'Tanpa alasan';
 

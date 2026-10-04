@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const pool = require('../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { requireString, cleanString, toBool } = require('../utils/validate');
@@ -285,7 +285,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin'), async (req, res, next) => {
+router.post('/', requirePermission('product.manage'), async (req, res, next) => {
   try {
     const { value, error } = validateProductBody(req.body || {});
     if (error) throw new HttpError(400, error);
@@ -309,7 +309,7 @@ router.post('/', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requirePermission('product.manage'), async (req, res, next) => {
   try {
     const { value, error } = validateProductBody(req.body || {}, { partial: true });
     if (error) throw new HttpError(400, error);
@@ -334,7 +334,7 @@ router.put('/:id', requireRole('admin'), async (req, res, next) => {
 });
 
 // Nonaktifkan produk (soft delete) agar riwayat transaksi tetap utuh.
-router.delete('/:id', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id', requirePermission('product.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(
       'UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id',
@@ -348,7 +348,7 @@ router.delete('/:id', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.post('/:id/image', requireRole('admin'), imageUpload.single('image'), async (req, res, next) => {
+router.post('/:id/image', requirePermission('product.manage'), imageUpload.single('image'), async (req, res, next) => {
   try {
     if (!req.file) throw new HttpError(400, 'File gambar wajib diunggah');
 
@@ -374,7 +374,7 @@ router.post('/:id/image', requireRole('admin'), imageUpload.single('image'), asy
 // =========================================================
 // Impor CSV (admin)
 // =========================================================
-router.post('/import', requireRole('admin'), imageUpload.single('file'), async (req, res, next) => {
+router.post('/import', requirePermission('product.manage'), imageUpload.single('file'), async (req, res, next) => {
   try {
     let text = '';
     if (req.file) {
@@ -506,7 +506,7 @@ router.get('/:id/units', async (req, res, next) => {
   }
 });
 
-router.post('/:id/units', requireRole('admin'), async (req, res, next) => {
+router.post('/:id/units', requirePermission('product.manage'), async (req, res, next) => {
   try {
     const unitName = requireString(req.body?.unit_name, 'Nama satuan', 20);
     if (unitName.error) throw new HttpError(400, unitName.error);
@@ -533,7 +533,7 @@ router.post('/:id/units', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id/units/:unitId', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id/units/:unitId', requirePermission('product.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(
       'DELETE FROM product_units WHERE id = $1 AND product_id = $2 RETURNING id',
@@ -594,7 +594,7 @@ router.get('/:id/barcodes', async (req, res, next) => {
   }
 });
 
-router.post('/:id/barcodes', requireRole('admin'), async (req, res, next) => {
+router.post('/:id/barcodes', requirePermission('product.manage'), async (req, res, next) => {
   try {
     const barcode = cleanString(req.body?.barcode, 50);
     if (!barcode) throw new HttpError(400, 'Barcode wajib diisi');
@@ -630,7 +630,7 @@ router.post('/:id/barcodes', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id/barcodes/:barcodeId', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id/barcodes/:barcodeId', requirePermission('product.manage'), async (req, res, next) => {
   try {
     await assertProductExists(req.params.id);
     const result = await pool.query(
@@ -667,7 +667,7 @@ router.get('/:id/tiers', async (req, res, next) => {
   }
 });
 
-router.post('/:id/tiers', requireRole('admin'), async (req, res, next) => {
+router.post('/:id/tiers', requirePermission('product.manage'), async (req, res, next) => {
   try {
     const productId = toInt(req.params.id, 0);
     if (productId <= 0) throw new HttpError(400, 'Produk tidak valid');
@@ -708,7 +708,7 @@ router.post('/:id/tiers', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id/tiers/:tierId', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id/tiers/:tierId', requirePermission('product.manage'), async (req, res, next) => {
   try {
     await assertProductExists(req.params.id);
     const result = await pool.query(

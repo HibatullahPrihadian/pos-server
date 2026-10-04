@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { verifyJwt } = require('../middleware/auth');
+const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
@@ -79,7 +79,7 @@ router.get('/:id', async (req, res, next) => {
 });
 
 // Retur per item dari struk. Mengembalikan stok dengan HPP asli (cost_price saat jual).
-router.post('/', async (req, res, next) => {
+router.post('/', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const saleId = toInt(req.body?.sale_id, 0);
     if (saleId <= 0) throw new HttpError(400, 'sale_id wajib diisi');

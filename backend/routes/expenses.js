@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { verifyJwt, requireRole } = require('../middleware/auth');
+const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { requireString, cleanString, isValidDate, toBool } = require('../utils/validate');
@@ -10,7 +10,7 @@ const { logAudit } = require('../utils/audit');
 
 const router = express.Router();
 
-router.use(verifyJwt, requireRole('admin'));
+router.use(verifyJwt, requirePermission('expense.manage'));
 
 const EXPENSE_SELECT = `
   SELECT e.*, ec.name AS category_name, u.full_name AS user_name
@@ -43,7 +43,7 @@ router.get('/categories', async (req, res, next) => {
   }
 });
 
-router.post('/categories', requireRole('admin'), async (req, res, next) => {
+router.post('/categories', requirePermission('expense.manage'), async (req, res, next) => {
   try {
     const name = requireString(req.body?.name, 'Nama kategori', 100);
     if (name.error) throw new HttpError(400, name.error);
@@ -58,7 +58,7 @@ router.post('/categories', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/categories/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/categories/:id', requirePermission('expense.manage'), async (req, res, next) => {
   try {
     const name = requireString(req.body?.name, 'Nama kategori', 100);
     if (name.error) throw new HttpError(400, name.error);
@@ -77,7 +77,7 @@ router.put('/categories/:id', requireRole('admin'), async (req, res, next) => {
 });
 
 // Hapus hanya jika belum dipakai beban; jika tidak, nonaktifkan saja.
-router.delete('/categories/:id', requireRole('admin'), async (req, res, next) => {
+router.delete('/categories/:id', requirePermission('expense.manage'), async (req, res, next) => {
   try {
     const used = await pool.query('SELECT COUNT(*)::int AS n FROM expenses WHERE expense_category_id = $1', [req.params.id]);
     if (used.rows[0].n > 0) {
@@ -178,7 +178,7 @@ const buildExpense = (body, existingPaid = 0) => {
   return { amount, date, categoryId, method, note, paymentStatus, paidAmount };
 };
 
-router.post('/', requireRole('admin'), async (req, res, next) => {
+router.post('/', requirePermission('expense.manage'), async (req, res, next) => {
   try {
     const payload = buildExpense(req.body);
     const created = await withTransaction(async (client) => {
@@ -207,7 +207,7 @@ router.post('/', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requirePermission('expense.manage'), async (req, res, next) => {
   try {
     const existing = await pool.query('SELECT * FROM expenses WHERE id = $1', [req.params.id]);
     if (!existing.rows[0]) throw new HttpError(404, 'Beban tidak ditemukan');
@@ -238,7 +238,7 @@ router.put('/:id', requireRole('admin'), async (req, res, next) => {
 
 // Hapus beban. Beban lunas tetap boleh dihapus (dengan audit) karena kesalahan
 // input beban tunai harus bisa dikoreksi; konfirmasi dilakukan di UI.
-router.delete('/:id', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id', requirePermission('expense.manage'), async (req, res, next) => {
   try {
     const existing = await pool.query('SELECT * FROM expenses WHERE id = $1', [req.params.id]);
     if (!existing.rows[0]) throw new HttpError(404, 'Beban tidak ditemukan');
@@ -258,7 +258,7 @@ router.delete('/:id', requireRole('admin'), async (req, res, next) => {
 });
 
 // Catat pembayaran beban (unpaid -> paid bila lunas). Pola purchases/:id/payment.
-router.post('/:id/payment', requireRole('admin'), async (req, res, next) => {
+router.post('/:id/payment', requirePermission('expense.manage'), async (req, res, next) => {
   try {
     const amount = toMoney(req.body?.amount);
     if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Jumlah bayar tidak valid');

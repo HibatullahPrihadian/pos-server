@@ -18,7 +18,8 @@ const EMPTY = { name: '', phone: '', email: '' };
 
 const Members = () => {
   const toast = useToastContext();
-  const { isAdmin } = useAuth();
+  const { can } = useAuth();
+  const canManage = can('member.manage');
   const [data, setData] = useState({ data: [], pagination: null });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -101,7 +102,7 @@ const Members = () => {
       <PageHeader
         title="Member"
         subtitle="Pelanggan terdaftar dengan harga khusus dan poin"
-        actions={<Button onClick={openCreate}><Plus size={16} /> Member Baru</Button>}
+        actions={canManage ? <Button onClick={openCreate}><Plus size={16} /> Member Baru</Button> : undefined}
       />
 
       <Card padded={false}>
@@ -139,7 +140,7 @@ const Members = () => {
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => openPoints(member)} title="Poin"><Star size={14} /></Button>
-                    {isAdmin && <Button variant="ghost" size="sm" onClick={() => openEdit(member)}><Pencil size={14} /></Button>}
+                    {canManage && <Button variant="ghost" size="sm" onClick={() => openEdit(member)}><Pencil size={14} /></Button>}
                   </div>
                 </td>
               </tr>
@@ -177,7 +178,7 @@ const Members = () => {
               <span className="text-2xl font-bold text-ios-yellow">{pointsData.points}</span>
             </div>
 
-            {isAdmin && (
+            {canManage && (
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <Input label="Perubahan (+/-)" type="number" value={adjustForm.change} onChange={(e) => setAdjustForm({ ...adjustForm, change: e.target.value })} placeholder="10" />
                 <Input label="Catatan" className="col-span-2" value={adjustForm.note} onChange={(e) => setAdjustForm({ ...adjustForm, note: e.target.value })} />

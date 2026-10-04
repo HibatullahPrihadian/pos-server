@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Eye, PackageCheck, Trash2, CreditCard, XCircle } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
@@ -28,6 +29,9 @@ const PO_TONES = {
 
 const Purchases = () => {
   const toast = useToastContext();
+  const { can } = useAuth();
+  const canManage = can('purchase.manage');
+  const canPay = can('purchase.pay');
   const [data, setData] = useState({ data: [], pagination: null });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -307,7 +311,7 @@ const Purchases = () => {
       <PageHeader
         title="Pembelian"
         subtitle="Purchase order, penerimaan barang, dan pembayaran supplier"
-        actions={<Button onClick={openCreate}><Plus size={16} /> PO Baru</Button>}
+        actions={canManage ? <Button onClick={openCreate}><Plus size={16} /> PO Baru</Button> : undefined}
       />
 
       <Card padded={false}>
@@ -343,17 +347,17 @@ const Purchases = () => {
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
                     <Button variant="ghost" size="sm" onClick={() => openDetail(po)} title="Detail"><Eye size={14} /></Button>
-                    {['draft', 'ordered'].includes(po.status) && (
+                    {canManage && ['draft', 'ordered'].includes(po.status) && (
                       <>
                         <Button variant="ghost" size="sm" onClick={() => openEdit(po)} title="Ubah">Ubah</Button>
                         <Button variant="ghost" size="sm" onClick={() => openReceive(po)} title="Terima"><PackageCheck size={14} className="text-ios-green" /></Button>
                         <Button variant="ghost" size="sm" onClick={() => setCancelConfirm(po)} title="Batalkan"><XCircle size={14} className="text-ios-red" /></Button>
                       </>
                     )}
-                    {po.status === 'partial' && (
+                    {canManage && po.status === 'partial' && (
                       <Button variant="ghost" size="sm" onClick={() => openReceive(po)} title="Terima Sisa"><PackageCheck size={14} className="text-ios-green" /></Button>
                     )}
-                    {po.payment_status === 'unpaid' && po.status !== 'cancelled' && (
+                    {canPay && po.payment_status === 'unpaid' && po.status !== 'cancelled' && (
                       <Button variant="ghost" size="sm" onClick={() => openPayment(po)} title="Bayar">
                         <CreditCard size={14} className="text-ios-blue" />
                       </Button>

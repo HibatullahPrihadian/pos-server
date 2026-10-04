@@ -1,6 +1,6 @@
 const express = require('express');
 const pool = require('../db');
-const { requireRole } = require('../middleware/auth');
+const { requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { requireString, cleanString, toBool } = require('../utils/validate');
 const { logAudit } = require('../utils/audit');
@@ -29,7 +29,7 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-router.post('/', requireRole('admin'), async (req, res, next) => {
+router.post('/', requirePermission('supplier.manage'), async (req, res, next) => {
   try {
     const name = requireString(req.body?.name, 'Nama supplier', 150);
     if (name.error) throw new HttpError(400, name.error);
@@ -49,7 +49,7 @@ router.post('/', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.put('/:id', requireRole('admin'), async (req, res, next) => {
+router.put('/:id', requirePermission('supplier.manage'), async (req, res, next) => {
   try {
     const name = requireString(req.body?.name, 'Nama supplier', 150);
     if (name.error) throw new HttpError(400, name.error);
@@ -75,7 +75,7 @@ router.put('/:id', requireRole('admin'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id', requireRole('admin'), async (req, res, next) => {
+router.delete('/:id', requirePermission('supplier.manage'), async (req, res, next) => {
   try {
     const used = await pool.query(
       'SELECT COUNT(*)::int AS n FROM products WHERE supplier_id = $1',

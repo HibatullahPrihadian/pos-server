@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Pencil, Trash2, Search } from 'lucide-react';
 import { api, downloadFile } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
@@ -20,6 +21,9 @@ const EMPTY = { sku: '', barcode: '', name: '', category_id: '', supplier_id: ''
 
 const Products = () => {
   const toast = useToastContext();
+  const { can } = useAuth();
+  const canManage = can('product.manage');
+  const canManageConsignment = can('consignment.manage');
   const [data, setData] = useState({ data: [], pagination: null });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -80,10 +84,15 @@ const Products = () => {
   useEffect(() => {
     api.get('/api/categories').then(setCategories).catch(() => {});
     api.get('/api/suppliers').then(setSuppliers).catch(() => {});
+  }, []);
+
+  // Data penitip butuh `consignment.manage`; hanya diambil bila user punya izin.
+  useEffect(() => {
+    if (!canManageConsignment) return;
     api.get('/api/consignment/consignors', { limit: 200 })
       .then((r) => setConsignors(r.data || []))
       .catch(() => {});
-  }, []);
+  }, [canManageConsignment]);
 
   const openCreate = () => {
     setEditing(null);
@@ -291,15 +300,19 @@ const Products = () => {
         subtitle="Kelola master produk, harga, stok minimum, dan satuan"
         actions={
           <>
-            <Button variant="neutral" onClick={() => { setImportOpen(true); setImportResult(null); setImportText(''); }}>
-              Impor CSV
-            </Button>
+            {canManage && (
+              <Button variant="neutral" onClick={() => { setImportOpen(true); setImportResult(null); setImportText(''); }}>
+                Impor CSV
+              </Button>
+            )}
             <Button variant="neutral" onClick={() => downloadFile('/api/products/export', 'produk.csv')}>
               Ekspor CSV
             </Button>
-            <Button onClick={openCreate}>
-              <Plus size={16} /> Produk Baru
-            </Button>
+            {canManage && (
+              <Button onClick={openCreate}>
+                <Plus size={16} /> Produk Baru
+              </Button>
+            )}
           </>
         }
       />
@@ -364,11 +377,15 @@ const Products = () => {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => openUnits(product)} title="Satuan">Satuan</Button>
-                    <Button variant="ghost" size="sm" onClick={() => openBarcodes(product)} title="Barcode tambahan">Barcode</Button>
-                    <Button variant="ghost" size="sm" onClick={() => openTiers(product)} title="Harga partai">Tier</Button>
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(product)}><Pencil size={14} /></Button>
-                    <Button variant="ghost" size="sm" onClick={() => setConfirm(product)}><Trash2 size={14} className="text-ios-red" /></Button>
+                    {canManage && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={() => openUnits(product)} title="Satuan">Satuan</Button>
+                        <Button variant="ghost" size="sm" onClick={() => openBarcodes(product)} title="Barcode tambahan">Barcode</Button>
+                        <Button variant="ghost" size="sm" onClick={() => openTiers(product)} title="Harga partai">Tier</Button>
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(product)}><Pencil size={14} /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => setConfirm(product)}><Trash2 size={14} className="text-ios-red" /></Button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -414,15 +431,19 @@ const Products = () => {
             <option value="1">Aktif</option>
             <option value="0">Nonaktif</option>
           </Input>
-          <Input as="select" label="Barang Titipan (Konsinyasi)" value={form.is_consignment ? '1' : '0'} onChange={(e) => setForm({ ...form, is_consignment: e.target.value === '1', consignor_id: e.target.value === '1' ? form.consignor_id : '' })}>
-            <option value="0">Bukan Konsinyasi</option>
-            <option value="1">Konsinyasi</option>
-          </Input>
-          {form.is_consignment && (
-            <Input as="select" label="Penitip" value={form.consignor_id} onChange={(e) => setForm({ ...form, consignor_id: e.target.value })}>
-              <option value="">- Pilih Penitip -</option>
-              {consignors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Input>
+          {canManageConsignment && (
+            <>
+              <Input as="select" label="Barang Titipan (Konsinyasi)" value={form.is_consignment ? '1' : '0'} onChange={(e) => setForm({ ...form, is_consignment: e.target.value === '1', consignor_id: e.target.value === '1' ? form.consignor_id : '' })}>
+                <option value="0">Bukan Konsinyasi</option>
+                <option value="1">Konsinyasi</option>
+              </Input>
+              {form.is_consignment && (
+                <Input as="select" label="Penitip" value={form.consignor_id} onChange={(e) => setForm({ ...form, consignor_id: e.target.value })}>
+                  <option value="">- Pilih Penitip -</option>
+                  {consignors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </Input>
+              )}
+            </>
           )}
         </div>
         <p className="mt-3 text-xs text-slate-500">Semua harga dalam rupiah dan sudah termasuk PPN. Harga Beli (HPP) produk konsinyasi dipakai sebagai harga setor ke penitip.</p>

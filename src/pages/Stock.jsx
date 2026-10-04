@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Search, ArrowLeftRight, TrendingDown, BookOpen, CalendarClock, Pencil } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
@@ -27,6 +28,8 @@ const TABS = [
 
 const Stock = () => {
   const toast = useToastContext();
+  const { can } = useAuth();
+  const canManage = can('stock.manage');
   const [searchParams, setSearchParams] = useSearchParams();
   const paramTab = searchParams.get('tab');
   const [tab, setTab] = useState(() => (TABS.some((t) => t.key === paramTab) ? paramTab : 'movements'));
@@ -198,7 +201,7 @@ const Stock = () => {
       <PageHeader
         title="Stok"
         subtitle="Kartu stok, peringatan stok minimum, dan penyesuaian manual"
-        actions={<Button onClick={() => setAdjustOpen(true)}><ArrowLeftRight size={16} /> Penyesuaian</Button>}
+        actions={canManage ? <Button onClick={() => setAdjustOpen(true)}><ArrowLeftRight size={16} /> Penyesuaian</Button> : undefined}
       />
 
       <div className="flex gap-2 mb-5">
@@ -288,13 +291,15 @@ const Stock = () => {
                   <td className="px-4 py-3 text-right text-ios-orange font-medium">{row.stock_qty}</td>
                   <td className="px-4 py-3 text-right text-slate-400">{row.min_stock}</td>
                   <td className="px-4 py-3 text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => { setAdjustForm({ product_id: row.id, qty_change: '', note: '', expiry_date: '' }); setAdjustOpen(true); }}
-                    >
-                      Sesuaikan
-                    </Button>
+                    {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setAdjustForm({ product_id: row.id, qty_change: '', note: '', expiry_date: '' }); setAdjustOpen(true); }}
+                      >
+                        Sesuaikan
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -347,13 +352,15 @@ const Stock = () => {
                         : <Badge tone="neutral">Aman</Badge>}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => { setEditBatch(row); setEditBatchForm({ expiry_date: row.expiry_date || '', batch_code: row.batch_code || '' }); }}
-                    >
-                      <Pencil size={14} /> Edit
-                    </Button>
+                    {canManage && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => { setEditBatch(row); setEditBatchForm({ expiry_date: row.expiry_date || '', batch_code: row.batch_code || '' }); }}
+                      >
+                        <Pencil size={14} /> Edit
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -369,7 +376,9 @@ const Stock = () => {
             Gunakan tombol <strong>Penyesuaian</strong> di kanan atas untuk mencatat barang rusak, hilang, atau koreksi stok.
             Setiap penyesuaian tercatat di kartu stok. Untuk penambahan, tanggal kadaluarsa batch opsional dapat diisi.
           </p>
-          <Button onClick={() => setAdjustOpen(true)}><ArrowLeftRight size={16} /> Buat Penyesuaian</Button>
+          {canManage && (
+            <Button onClick={() => setAdjustOpen(true)}><ArrowLeftRight size={16} /> Buat Penyesuaian</Button>
+          )}
         </Card>
       )}
 

@@ -9,7 +9,7 @@ Referensi pola arsitektur: `/Users/ibet/Documents/Antigravity/Tracker` (React + 
 ## 1. Fitur
 
 **Kasir & Penjualan**
-- Login role **admin** & **kasir** (bcrypt + JWT)
+- Login role **admin**, **kasir**, & **gudang** (bcrypt + JWT) dengan **izin granular per user** (lihat §6a)
 - Scan barcode via **scanner USB** (input keyboard) atau **kamera HP** (butuh HTTPS, lihat §4) — di POS, Produk, Pembelian, dan Stok
 - Pencarian produk (tata letak POS 1 kolom: bar scan/pencarian di atas, keranjang penuh, ringkasan TOTAL + Bayar *sticky* di bawah)
 - Multi-satuan per produk (pcs/dus/karton) dengan faktor konversi
@@ -39,7 +39,7 @@ Referensi pola arsitektur: `/Users/ibet/Documents/Antigravity/Tracker` (React + 
 - Dashboard KPI (termasuk **laba bersih** & **modal**; kartu KPI dapat diklik menuju menu/tab terkait), penjualan harian/periode, per kasir, per metode bayar, **laba kotor**, **laba rugi**, **modal (pembelian lunas)**, produk terlaris, stok minimum, kartu stok
 - **Beban operasional** (gaji, sewa, listrik, dll.) dengan kategori & status bayar; dipakai menghitung **laba bersih**
 - Semua laporan dapat diekspor **CSV**
-- Pengguna, Pengaturan toko (identitas, PPN, struk, QRIS, poin, ambang peringatan kadaluarsa)
+- Pengguna (termasuk pengaturan **izin per modul**), Pengaturan toko (identitas, PPN, struk, QRIS, poin, ambang peringatan kadaluarsa)
 
 ---
 
@@ -77,10 +77,11 @@ pos-server/
 │   ├── server.js            # bootstrap express, mount routers
 │   ├── init.sql             # skema (idempotent)
 │   ├── seed.sql             # data contoh (idempotent)
-│   ├── middleware/          # auth.js (JWT + role), error.js
+│   ├── middleware/          # auth.js (JWT + izin), error.js
 │   ├── utils/               # money, invoice, csv, pagination, validate,
 │   │                        # stock, batches (FEFO), item_pricing, pricing,
-│   │                        # promotions, barcode (EAN-13), settings, upload, audit
+│   │                        # promotions, barcode (EAN-13), settings, upload, audit,
+│   │                        # permissions (daftar izin + preset role)
 │   ├── routes/              # auth, users, settings, categories, suppliers,
 │   │                        # products, promotions, bundles, consignment,
 │   │                        # attendance, members, stock, purchases, expenses,
@@ -231,6 +232,9 @@ sehingga tidak ada password default yang tersimpan di repo:
   docker compose logs backend | grep "Password acak"
   ```
 
+Akun **gudang** bersifat opsional: dibuat hanya bila `GUDANG_USERNAME` diisi di `.env`
+(`GUDANG_PASSWORD`, `GUDANG_FULL_NAME`).
+
 > Segera ubah password melalui menu **Pengguna** setelah login pertama. Backend tidak
 > akan pernah menjalankan dengan `JWT_SECRET` kosong atau bernilai contoh.
 
@@ -286,18 +290,48 @@ Buka http://localhost:3000.
 
 ---
 
+## 6a. Role & izin granular
+
+Otorisasi memakai **izin per modul** yang disimpan di `users.permissions` (JSONB), bukan
+lagi hanya biner admin/kasir. Nilai `NULL` berarti "pakai preset role"; array eksplisit
+berarti izin custom per user. **Admin selalu punya semua izin** (bypass) dan tidak dapat
+mengunci dirinya sendiri.
+
+Izin dimuat dari DB **per request**, jadi cabut/beri izin langsung berlaku tanpa login ulang.
+
+| Preset | Izin |
+|---|---|
+| **admin** | semua |
+| **kasir** | `pos.use`, `shift.use`, `attendance.self`, `product.view`, `stock.view`, `member.manage` |
+| **gudang** | `pos.use`, `shift.use`, `attendance.self`, `product.view`, `product.manage`, `stock.view`, `stock.manage`, `purchase.view`, `purchase.manage` |
+
+Gudang **boleh jualan di POS** dan terima PO, tetapi **tidak** boleh bayar ke supplier
+(`purchase.pay`), kelola supplier/konsinyasi/paket/promo/beban, atau mengakses laporan,
+pengguna, dan pengaturan.
+
+Daftar kunci izin (`backend/utils/permissions.js`, diekspos lewat `GET /api/users/permissions`):
+
+`pos.use`, `shift.use`, `attendance.self`, `product.view`, `product.manage`, `stock.view`,
+`stock.manage`, `purchase.view`, `purchase.manage`, `purchase.pay`, `supplier.manage`,
+`consignment.manage`, `bundle.manage`, `promotion.manage`, `member.manage`, `expense.manage`,
+`report.view`, `user.manage`, `settings.manage`.
+
+Izin akhir dapat diatur per user via checkbox di halaman **Pengguna**.
+
+---
+
 ## 7. API
 
-Semua endpoint berprefiks `/api`. Hanya `POST /api/auth/login` yang publik; sisanya wajib `Authorization: Bearer <token>`. Endpoint admin dibatasi `requireRole('admin')`.
+Semua endpoint berprefiks `/api`. Hanya `POST /api/auth/login` yang publik; sisanya wajib `Authorization: Bearer <token>`. Endpoint dibatasi izin granular via `requirePermission('...')` (default: cukup salah satu kunci; `requirePermission.all(...)` untuk menuntut semua).
 
 - **Auth**: `POST /auth/login`, `GET /auth/me`, `POST /auth/change-password`
-- **Users** (admin): `GET/POST /users`, `PUT /users/:id`, `PUT /users/:id/deactivate`
+- **Users** (`user.manage`): `GET/POST /users`, `GET /users/permissions`, `PUT /users/:id`, `PUT /users/:id/deactivate`
 - **Categories / Suppliers**: CRUD
 - **Products**: `GET /products`, `GET /products/barcode/:barcode`, `GET /products/:id`, `POST/PUT/DELETE`, `POST /products/import`, `GET /products/export`, `POST /products/:id/image`, `GET/POST/DELETE /products/:id/units`, `GET/POST/DELETE /products/:id/barcodes`, `GET/POST/DELETE /products/:id/tiers`, `POST /products/quote`
-- **Promotions** (admin): `GET/POST /promotions`, `GET/PUT/DELETE /promotions/:id`
-- **Bundles**: `GET /bundles`, `GET/POST/PUT/DELETE /bundles/:id`, `GET/PUT /bundles/:id/items`, `GET /bundles/barcode/:barcode`, `GET /bundles/barcode/generate` (admin), `GET /bundles/:id/barcode.svg` (admin), `POST /bundles/barcodes/render` (admin)
-- **Consignment**: CRUD `/consignment/consignors`, `GET /consignment/products`, `GET /consignment/sales`, `GET /consignment/payables`, `GET/POST /consignment/payouts`
-- **Attendance**: `POST /attendance/check-in`, `POST /attendance/check-out`, `GET /attendance/me`, `GET /attendance` (admin), `GET /attendance/summary` (admin), `POST /attendance/manual` (admin)
+- **Promotions** (`promotion.manage`): `GET/POST /promotions`, `GET/PUT/DELETE /promotions/:id`
+- **Bundles**: `GET /bundles`, `GET/POST/PUT/DELETE /bundles/:id`, `GET/PUT /bundles/:id/items`, `GET /bundles/barcode/:barcode`, `GET /bundles/barcode/generate` (`bundle.manage`), `GET /bundles/:id/barcode.svg` (`bundle.manage`), `POST /bundles/barcodes/render` (`bundle.manage`)
+- **Consignment** (`consignment.manage`): CRUD `/consignment/consignors`, `GET /consignment/products`, `GET /consignment/sales`, `GET /consignment/payables`, `GET/POST /consignment/payouts`
+- **Attendance**: `POST /attendance/check-in`, `POST /attendance/check-out`, `GET /attendance/me` (`attendance.self`), `GET /attendance` (`user.manage`), `GET /attendance/summary` (`user.manage`), `POST /attendance/manual` (`user.manage`)
 - **Members**: CRUD, `GET /members/:id/points`, `POST /members/:id/points/adjust`
 - **Stock**: `GET /stock/movements`, `GET /stock/low`, `GET /stock/batches`, `GET /stock/expiring`, `PUT /stock/batches/:id`, `POST /stock/adjustments`, `GET/POST /stock/opnames`, `GET /stock/opnames/:id`, `PUT /stock/opnames/:id/items`, `POST /stock/opnames/:id/post`
 - **Purchases**: `GET/POST /purchases`, `GET/PUT /purchases/:id`, `POST /purchases/:id/receive`, `POST /purchases/:id/payment`, `POST /purchases/:id/cancel`
@@ -373,6 +407,8 @@ cd backend && npm run check   # cek sintaks backend
 ```
 
 Uji alur kritis disarankan manual end-to-end: login admin → master data & impor CSV → atur tier/promo/paket → PO & penerimaan (cek HPP + batch/kadaluarsa) → buka shift → jual multi-satuan + diskon + split payment + member/poin → cetak struk → retur → void → absensi → konsinyasi (terima → jual → payout) → catat beban operasional → tutup shift (cek selisih) → cek semua laporan (termasuk Laba Rugi & Modal) & ekspor CSV → generate + cetak label barcode paket → uji role kasir (403).
+
+Uji izin granular: login **gudang** → menu Stok/Opname/Pembelian/Produk tampil, bisa buat PO & terima barang, bisa buka shift & transaksi POS, tetapi menu Laporan/Beban/Pengguna/Pengaturan **tidak** tampil dan tombol **Bayar** supplier tidak ada (endpoint langsung pun 403). Uji izin custom: beri gudang `report.view` lewat halaman Pengguna → menu Laporan langsung muncul tanpa login ulang; cabut → hilang & API 403. Uji ketiga role (admin/kasir/gudang) untuk memastikan kasir tidak mendapat izin baru.
 
 ---
 

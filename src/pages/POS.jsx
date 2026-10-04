@@ -32,7 +32,8 @@ const PAY_METHODS = [
 
 const POS = () => {
   const toast = useToastContext();
-  const { user } = useAuth();
+  const { user, can } = useAuth();
+  const canCreateMember = can('member.manage');
   const { settings } = useSettings();
   const cart = useCart();
 
@@ -715,16 +716,18 @@ const POS = () => {
           )}
         </div>
 
-        <div className="border-t border-white/10 mt-4 pt-4">
-          <p className="text-sm font-medium text-white mb-2">Daftar Member Baru</p>
-          <div className="space-y-2">
-            <Input label="Nama" value={newMember.name} onChange={(e) => setNewMember({ ...newMember, name: e.target.value })} />
-            <Input label="Telepon" value={newMember.phone} onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })} />
-            <Button className="w-full" onClick={addNewMember} disabled={!newMember.name}>
-              <UserPlus size={16} /> Daftarkan
-            </Button>
+        {canCreateMember && (
+          <div className="border-t border-white/10 mt-4 pt-4">
+            <p className="text-sm font-medium text-white mb-2">Daftar Member Baru</p>
+            <div className="space-y-2">
+              <Input label="Nama" value={newMember.name} onChange={(e) => setNewMember({ ...newMember, name: e.target.value })} />
+              <Input label="Telepon" value={newMember.phone} onChange={(e) => setNewMember({ ...newMember, phone: e.target.value })} />
+              <Button className="w-full" onClick={addNewMember} disabled={!newMember.name}>
+                <UserPlus size={16} /> Daftarkan
+              </Button>
+            </div>
           </div>
-        </div>
+        )}
       </Modal>
 
       {/* Modal pembayaran */}

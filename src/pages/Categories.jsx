@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
@@ -13,6 +14,8 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 
 const Categories = () => {
   const toast = useToastContext();
+  const { can } = useAuth();
+  const canManage = can('supplier.manage');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -72,7 +75,7 @@ const Categories = () => {
       <PageHeader
         title="Kategori"
         subtitle="Kelompokkan produk untuk memudahkan pencarian di kasir"
-        actions={<Button onClick={openCreate}><Plus size={16} /> Kategori Baru</Button>}
+        actions={canManage ? <Button onClick={openCreate}><Plus size={16} /> Kategori Baru</Button> : undefined}
       />
 
       <Card padded={false}>
@@ -87,8 +90,12 @@ const Categories = () => {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => openEdit(row)}><Pencil size={14} /></Button>
-                    <Button variant="ghost" size="sm" onClick={() => setConfirm(row)}><Trash2 size={14} className="text-ios-red" /></Button>
+                    {canManage && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(row)}><Pencil size={14} /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => setConfirm(row)}><Trash2 size={14} className="text-ios-red" /></Button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>

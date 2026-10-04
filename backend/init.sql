@@ -10,10 +10,36 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50) UNIQUE NOT NULL,
     full_name VARCHAR(100) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(10) NOT NULL DEFAULT 'kasir' CHECK (role IN ('admin', 'kasir')),
+    role VARCHAR(10) NOT NULL DEFAULT 'kasir' CHECK (role IN ('admin', 'kasir', 'gudang')),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    permissions JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Role baru 'gudang' + izin granular per user (JSON). Tabel users pada DB yang
+-- sudah berjalan dibuat sebelum kolom/role ini ada, sehingga CREATE TABLE IF
+-- NOT EXISTS di atas tidak mengubahnya — perlu ALTER idempotent.
+-- Guard via pg_constraint agar hanya diubah bila definisinya belum memuat
+-- 'gudang' (DROP/ADD constraint memakai ACCESS EXCLUSIVE lock + validasi ulang
+-- seluruh baris, jadi jangan dijalankan setiap kali init.sql diulang).
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'users_role_check'
+          AND pg_get_constraintdef(oid) NOT LIKE '%gudang%'
+    ) THEN
+        ALTER TABLE users DROP CONSTRAINT users_role_check;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check'
+    ) THEN
+        ALTER TABLE users ADD CONSTRAINT users_role_check
+            CHECK (role IN ('admin', 'kasir', 'gudang'));
+    END IF;
+END $$;
+-- NULL = pakai preset role; array eksplisit = izin custom per user.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB;
 
 CREATE TABLE IF NOT EXISTS store_settings (
     id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),

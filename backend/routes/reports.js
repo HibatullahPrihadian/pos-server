@@ -1,13 +1,13 @@
 const express = require('express');
 const pool = require('../db');
-const { verifyJwt, requireRole } = require('../middleware/auth');
+const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { isValidDate } = require('../utils/validate');
 const { toInt } = require('../utils/pagination');
 const { sendCsv } = require('../utils/csv');
 
 const router = express.Router();
 
-router.use(verifyJwt, requireRole('admin'));
+router.use(verifyJwt, requirePermission('report.view'));
 
 // Zona waktu toko untuk "hari ini"/"bulan ini" pada pembelian. purchases.date diisi
 // dari tanggal lokal klien (WIB), sedangkan sesi DB berjalan di UTC — pin zona waktu

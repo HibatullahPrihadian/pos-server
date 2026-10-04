@@ -21,7 +21,18 @@ const Login = () => {
     setSubmitting(true);
     try {
       const loggedIn = await login(username.trim(), password);
-      navigate(loggedIn.role === 'admin' ? '/' : '/pos', { replace: true });
+      // Dashboard butuh `report.view`; role lain diarahkan ke POS (atau stock
+      // bila POS tidak tersedia).
+      const perms = loggedIn.permissions || [];
+      const isAdmin = loggedIn.role === 'admin' || loggedIn.is_admin;
+      const target = isAdmin || perms.includes('report.view')
+        ? '/'
+        : perms.includes('pos.use')
+          ? '/pos'
+          : perms.includes('stock.view')
+            ? '/stock'
+            : '/attendance';
+      navigate(target, { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {

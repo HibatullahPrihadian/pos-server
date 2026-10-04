@@ -4,6 +4,7 @@ const pool = require('../db');
 const { signToken, verifyJwt } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { requireString } = require('../utils/validate');
+const { resolvePermissions } = require('../utils/permissions');
 
 const router = express.Router();
 
@@ -26,7 +27,14 @@ router.post('/login', async (req, res, next) => {
     const token = signToken(user);
     res.json({
       token,
-      user: { id: user.id, username: user.username, full_name: user.full_name, role: user.role },
+      user: {
+        id: user.id,
+        username: user.username,
+        full_name: user.full_name,
+        role: user.role,
+        permissions: resolvePermissions(user),
+        is_admin: user.role === 'admin',
+      },
     });
   } catch (err) {
     next(err);
@@ -36,11 +44,16 @@ router.post('/login', async (req, res, next) => {
 router.get('/me', verifyJwt, async (req, res, next) => {
   try {
     const result = await pool.query(
-      'SELECT id, username, full_name, role, is_active, created_at FROM users WHERE id = $1',
+      'SELECT id, username, full_name, role, is_active, permissions, created_at FROM users WHERE id = $1',
       [req.user.id]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Pengguna tidak ditemukan');
-    res.json(result.rows[0]);
+    const user = result.rows[0];
+    res.json({
+      ...user,
+      permissions: resolvePermissions(user),
+      is_admin: user.role === 'admin',
+    });
   } catch (err) {
     next(err);
   }

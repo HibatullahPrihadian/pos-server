@@ -1,7 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { verifyJwt, requireRole } = require('../middleware/auth');
+const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { requireString, cleanString, isValidDate } = require('../utils/validate');
@@ -9,7 +9,7 @@ const { logAudit } = require('../utils/audit');
 
 const router = express.Router();
 
-router.use(verifyJwt, requireRole('admin'));
+router.use(verifyJwt, requirePermission('consignment.manage'));
 
 const resolveRange = (query) => {
   const today = new Date();

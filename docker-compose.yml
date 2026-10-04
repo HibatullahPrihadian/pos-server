@@ -45,6 +45,10 @@ services:
       KASIR_USERNAME: ${KASIR_USERNAME:-kasir}
       KASIR_PASSWORD: ${KASIR_PASSWORD:-}
       KASIR_FULL_NAME: ${KASIR_FULL_NAME:-Kasir Satu}
+      # Akun gudang opsional: dibuat hanya bila GUDANG_USERNAME diisi.
+      GUDANG_USERNAME: ${GUDANG_USERNAME:-}
+      GUDANG_PASSWORD: ${GUDANG_PASSWORD:-}
+      GUDANG_FULL_NAME: ${GUDANG_FULL_NAME:-Petugas Gudang}
     volumes:
       - ./backend/uploads:/app/uploads
     depends_on:
