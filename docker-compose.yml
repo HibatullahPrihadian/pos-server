@@ -35,6 +35,9 @@ services:
       CORS_ORIGIN: ${CORS_ORIGIN:-}
       UPLOAD_DIR: /app/uploads
       MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-5}
+      # Zona waktu toko untuk batas "hari ini"/"bulan ini" (KPI Modal). Klien mengisi
+      # purchases.date dengan tanggal lokal; default WIB.
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Jakarta}
       # Akun awal. Bila kosong, backend membuat password acak dan mencetaknya ke log.
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}

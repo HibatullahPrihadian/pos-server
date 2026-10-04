@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Search, ArrowLeftRight, TrendingDown, BookOpen, CalendarClock, Pencil } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
@@ -26,7 +27,9 @@ const TABS = [
 
 const Stock = () => {
   const toast = useToastContext();
-  const [tab, setTab] = useState('movements');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const paramTab = searchParams.get('tab');
+  const [tab, setTab] = useState(() => (TABS.some((t) => t.key === paramTab) ? paramTab : 'movements'));
 
   const [movements, setMovements] = useState({ data: [], pagination: null });
   const [loading, setLoading] = useState(false);
@@ -104,6 +107,16 @@ const Stock = () => {
     if (tab === 'low') loadLow();
     if (tab === 'batches') loadBatches();
   }, [tab, loadMovements, loadLow, loadBatches]);
+
+  useEffect(() => {
+    if (searchParams.get('tab') !== tab) setSearchParams({ tab }, { replace: true });
+  }, [tab, searchParams, setSearchParams]);
+
+  // Ikuti perubahan URL (mis. tombol back/forward) saat komponen tetap ter-mount.
+  useEffect(() => {
+    const next = searchParams.get('tab');
+    if (TABS.some((t) => t.key === next)) setTab(next);
+  }, [searchParams]);
 
   useEffect(() => {
     api

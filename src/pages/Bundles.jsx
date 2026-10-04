@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Pencil, Trash2, Power, PackagePlus } from 'lucide-react';
+import { Plus, Pencil, Trash2, Power, PackagePlus, Wand2, RefreshCw, LayoutList, Barcode } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
 import PageHeader from '../components/ui/PageHeader';
@@ -11,12 +11,19 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import Pagination from '../components/ui/Pagination';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import BundleBarcodeTab from '../components/bundles/BundleBarcodeTab';
 import { formatCurrency } from '../utils/formatters';
 
 const EMPTY = { sku: '', name: '', barcode: '', price: '', is_active: true, items: [] };
 
+const TABS = [
+  { key: 'list', label: 'Daftar Paket', icon: LayoutList },
+  { key: 'barcode', label: 'Barcode', icon: Barcode },
+];
+
 const Bundles = () => {
   const toast = useToastContext();
+  const [tab, setTab] = useState('list');
   const [data, setData] = useState({ data: [], pagination: null });
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -26,6 +33,7 @@ const Bundles = () => {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [confirm, setConfirm] = useState(null);
   const [detail, setDetail] = useState(null);
 
@@ -139,6 +147,18 @@ const Bundles = () => {
     }
   };
 
+  const generateBarcode = async () => {
+    setGenerating(true);
+    try {
+      const res = await api.get('/api/bundles/barcode/generate');
+      setForm((f) => ({ ...f, barcode: res.barcode }));
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const columns = [
     { key: 'sku', label: 'SKU' },
     { key: 'name', label: 'Nama Paket' },
@@ -156,6 +176,21 @@ const Bundles = () => {
         actions={<Button onClick={openCreate}><PackagePlus size={16} /> Paket Baru</Button>}
       />
 
+      <div className="flex flex-wrap gap-2 mb-5">
+        {TABS.map(({ key, label, icon: Icon }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-ios-sm text-sm transition-colors ${tab === key ? 'bg-ios-blue text-white shadow-glow-blue' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
+          >
+            <Icon size={16} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'barcode' ? (
+        <BundleBarcodeTab />
+      ) : (
       <Card padded={false}>
         <div className="p-4">
           <Table columns={columns} loading={loading} empty="Belum ada paket">
@@ -186,6 +221,7 @@ const Bundles = () => {
           <Pagination pagination={data.pagination} onChange={setPage} />
         </div>
       </Card>
+      )}
 
       <Modal
         isOpen={modalOpen}
@@ -201,7 +237,20 @@ const Bundles = () => {
       >
         <div className="grid grid-cols-2 gap-4">
           <Input label="SKU *" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
-          <Input label="Barcode" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} />
+          <div>
+            <Input
+              label="Barcode (EAN-13 internal)"
+              value={form.barcode}
+              onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+              title="Kode EAN-13; gunakan Generate untuk membuat kode internal otomatis"
+            />
+            <div className="flex gap-2 mt-1.5">
+              <Button variant="neutral" size="sm" onClick={generateBarcode} disabled={generating}>
+                {generating ? <RefreshCw size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                Generate
+              </Button>
+            </div>
+          </div>
           <Input label="Nama Paket *" className="col-span-2" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
           <Input label="Harga Paket (Rp) *" type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
           <Input as="select" label="Status" value={form.is_active ? '1' : '0'} onChange={(e) => setForm({ ...form, is_active: e.target.value === '1' })}>

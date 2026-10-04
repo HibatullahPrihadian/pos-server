@@ -9,6 +9,11 @@ const router = express.Router();
 
 router.use(verifyJwt, requireRole('admin'));
 
+// Zona waktu toko untuk "hari ini"/"bulan ini" pada pembelian. purchases.date diisi
+// dari tanggal lokal klien (WIB), sedangkan sesi DB berjalan di UTC — pin zona waktu
+// agar batas hari tidak bergeser. Dapat dioverride lewat env APP_TIMEZONE.
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Jakarta';
+
 // Kolom DATE dikembalikan sebagai string 'YYYY-MM-DD' oleh db.js. Helper ini
 // tetap menangani objek Date (memakai komponen lokal) sebagai pengaman.
 const pad2 = (n) => String(n).padStart(2, '0');
@@ -377,6 +382,85 @@ router.get('/profit-loss', async (req, res, next) => {
 });
 
 // =========================================================
+// Modal pembelian (PO yang sudah dibayar penuh ke supplier)
+// =========================================================
+// Murni informatif: pembelian stok mengubah kas menjadi persediaan (aset),
+// bukan beban laba. Filter opsional: supplier_id, search (kode/invoice).
+router.get('/purchase-paid', async (req, res, next) => {
+  try {
+    const { from, to } = resolveRange(req.query);
+    const params = [from, to];
+    const conditions = ["pu.payment_status = 'paid'", "pu.status <> 'cancelled'", 'pu.date >= $1::date', 'pu.date <= $2::date'];
+
+    const supplierId = Number(req.query.supplier_id);
+    if (Number.isInteger(supplierId) && supplierId > 0) {
+      params.push(supplierId);
+      conditions.push(`pu.supplier_id = $${params.length}`);
+    }
+
+    const search = String(req.query.search || '').trim();
+    if (search) {
+      const pattern = `%${search.replace(/[\\%_]/g, '\\$&')}%`;
+      params.push(pattern);
+      conditions.push(`(pu.code ILIKE $${params.length} ESCAPE '\\' OR COALESCE(pu.invoice_no, '') ILIKE $${params.length} ESCAPE '\\')`);
+    }
+
+    const where = conditions.join(' AND ');
+
+    const result = await pool.query(
+      `SELECT pu.id, pu.code, pu.date, s.name AS supplier_name, pu.invoice_no,
+              pu.status, pu.total, pu.paid_amount, pu.received_at,
+              COALESCE(SUM(pi.qty), 0)::int AS qty_total,
+              COALESCE(SUM(pi.base_qty), 0)::int AS base_qty_total,
+              COUNT(pi.id)::int AS item_count
+       FROM purchases pu
+       LEFT JOIN suppliers s ON s.id = pu.supplier_id
+       LEFT JOIN purchase_items pi ON pi.purchase_id = pu.id
+       WHERE ${where}
+       GROUP BY pu.id, s.name
+       ORDER BY pu.date DESC, pu.id DESC`,
+      params
+    );
+
+    const rows = result.rows.map((r) => ({
+      id: r.id,
+      code: r.code,
+      date: toIso(r.date),
+      supplier_name: r.supplier_name || '-',
+      invoice_no: r.invoice_no || '',
+      status: r.status,
+      total: Number(r.total),
+      paid_amount: Number(r.paid_amount),
+      received_at: r.received_at ? r.received_at.toISOString() : '',
+      qty_total: r.qty_total,
+      base_qty_total: r.base_qty_total,
+      item_count: r.item_count,
+    }));
+
+    if (wantsCsv(req.query)) {
+      return sendCsv(res, `modal-pembelian-${from}_${to}.csv`, rows, [
+        'id', 'code', 'date', 'supplier_name', 'invoice_no', 'status', 'total', 'paid_amount', 'received_at', 'qty_total', 'base_qty_total', 'item_count',
+      ]);
+    }
+
+    const summary = rows.reduce(
+      (acc, r) => ({
+        total_amount: acc.total_amount + r.total,
+        total_paid: acc.total_paid + r.paid_amount,
+        po_count: acc.po_count + 1,
+        item_qty: acc.item_qty + r.qty_total,
+        item_base_qty: acc.item_base_qty + r.base_qty_total,
+      }),
+      { total_amount: 0, total_paid: 0, po_count: 0, item_qty: 0, item_base_qty: 0 }
+    );
+
+    res.json({ from, to, summary, rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================
 // Produk terlaris
 // =========================================================
 router.get('/top-products', async (req, res, next) => {
@@ -584,6 +668,26 @@ router.get('/dashboard', async (req, res, next) => {
        GROUP BY created_at::date ORDER BY created_at::date`
     );
 
+    // Modal pembelian lunas (informatif). Kriteria & rentang sama dengan tab Laporan "Modal"
+    // (from = awal bulan, to = hari ini). purchases.date ditulis dari tanggal lokal klien,
+    // jadi bandingkan dengan tanggal lokal (bukan CURRENT_DATE/UTC) agar batas hari konsisten.
+    const purchasePaidMonth = await pool.query(
+      `SELECT COALESCE(SUM(total), 0)::bigint AS amount, COUNT(*)::int AS po_count
+       FROM purchases
+       WHERE payment_status = 'paid' AND status <> 'cancelled'
+         AND date >= DATE_TRUNC('month', (CURRENT_TIMESTAMP AT TIME ZONE $1))::date
+         AND date <= (CURRENT_TIMESTAMP AT TIME ZONE $1)::date`,
+      [APP_TIMEZONE]
+    );
+
+    const purchasePaidToday = await pool.query(
+      `SELECT COALESCE(SUM(total), 0)::bigint AS amount, COUNT(*)::int AS po_count
+       FROM purchases
+       WHERE payment_status = 'paid' AND status <> 'cancelled'
+         AND date = (CURRENT_TIMESTAMP AT TIME ZONE $1)::date`,
+      [APP_TIMEZONE]
+    );
+
     res.json({
       today: {
         txn_count: today.rows[0].txn_count,
@@ -591,6 +695,8 @@ router.get('/dashboard', async (req, res, next) => {
         tax_total: Number(today.rows[0].tax_total),
         gross_profit: Number(profitToday.rows[0].gross_profit),
         expense: Number(expenseToday.rows[0].expense),
+        purchase_paid: Number(purchasePaidToday.rows[0].amount),
+        purchase_paid_count: purchasePaidToday.rows[0].po_count,
         // Laba bersih hari ini = laba kotor - koreksi retur - beban hari ini.
         net_profit:
           Number(profitToday.rows[0].gross_profit)
@@ -602,6 +708,8 @@ router.get('/dashboard', async (req, res, next) => {
         grand_total: Number(month.rows[0].grand_total),
         gross_profit: Number(profitMonth.rows[0].gross_profit),
         expense: Number(expenseMonth.rows[0].expense),
+        purchase_paid: Number(purchasePaidMonth.rows[0].amount),
+        purchase_paid_count: purchasePaidMonth.rows[0].po_count,
         // Samakan dengan net_profit harian & /profit-loss: koreksi retur ikut dihitung.
         net_profit:
           Number(profitMonth.rows[0].gross_profit)

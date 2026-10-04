@@ -5,13 +5,14 @@ import {
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Spinner from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
 import { formatCurrency, formatDate } from '../utils/formatters';
 
-const KPI = ({ icon: Icon, label, value, sub, tone = 'blue' }) => {
+const KPI = ({ icon: Icon, label, value, sub, tone = 'blue', to }) => {
   const tones = {
     blue: 'bg-ios-blue/15 border-ios-blue/30 text-ios-blue',
     green: 'bg-ios-green/15 border-ios-green/30 text-ios-green',
@@ -20,7 +21,7 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue' }) => {
     red: 'bg-ios-red/15 border-ios-red/30 text-ios-red',
   };
 
-  return (
+  const content = (
     <Card>
       <div className="flex items-start justify-between">
         <div>
@@ -34,10 +35,24 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue' }) => {
       </div>
     </Card>
   );
+
+  if (!to) return content;
+
+  return (
+    <Link
+      to={to}
+      title={`Buka ${label}`}
+      aria-label={`Buka ${label}`}
+      className="block rounded-ios transition-transform hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/70 [&>div]:transition-colors [&>div:hover]:border-white/20 [&>div:hover]:bg-slate-900/80"
+    >
+      {content}
+    </Link>
+  );
 };
 
 const Dashboard = () => {
   const toast = useToastContext();
+  const { isAdmin } = useAuth();
   const [data, setData] = useState(null);
   const [expiring, setExpiring] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -60,6 +75,9 @@ const Dashboard = () => {
 
   const maxTrend = Math.max(...data.trend.map((t) => t.grand_total), 1);
 
+  // Halaman tujuan KPI bersifat admin-only; kasir tetap melihat kartu namun statis.
+  const linkTo = (path) => (isAdmin ? path : undefined);
+
   return (
     <div>
       <PageHeader title="Dashboard" subtitle="Ringkasan operasional toko" />
@@ -71,6 +89,7 @@ const Dashboard = () => {
           value={formatCurrency(data.today.grand_total)}
           sub={`${data.today.txn_count} transaksi`}
           tone="green"
+          to={linkTo('/reports?tab=sales-summary')}
         />
         <KPI
           icon={PiggyBank}
@@ -78,6 +97,7 @@ const Dashboard = () => {
           value={formatCurrency(data.today.gross_profit)}
           sub={`PPN ${formatCurrency(data.today.tax_total)}`}
           tone="purple"
+          to={linkTo('/reports?tab=gross-profit')}
         />
         <KPI
           icon={Wallet}
@@ -85,6 +105,7 @@ const Dashboard = () => {
           value={formatCurrency(data.today.net_profit ?? 0)}
           sub={`Beban ${formatCurrency(data.today.expense ?? 0)}`}
           tone={(data.today.net_profit ?? 0) >= 0 ? 'green' : 'red'}
+          to={linkTo('/reports?tab=profit-loss')}
         />
         <KPI
           icon={Wallet}
@@ -92,6 +113,7 @@ const Dashboard = () => {
           value={formatCurrency(data.month.net_profit ?? 0)}
           sub={`Beban ${formatCurrency(data.month.expense ?? 0)}`}
           tone={(data.month.net_profit ?? 0) >= 0 ? 'blue' : 'red'}
+          to={linkTo('/reports?tab=profit-loss')}
         />
         <KPI
           icon={Receipt}
@@ -99,6 +121,15 @@ const Dashboard = () => {
           value={formatCurrency(data.month.grand_total)}
           sub={`${data.month.txn_count} transaksi`}
           tone="blue"
+          to={linkTo('/reports?tab=sales-summary')}
+        />
+        <KPI
+          icon={ShoppingBag}
+          label="Modal"
+          value={formatCurrency(data.month.purchase_paid ?? 0)}
+          sub={`Hari ini ${formatCurrency(data.today.purchase_paid ?? 0)} · ${data.month.purchase_paid_count ?? 0} PO lunas`}
+          tone="blue"
+          to={linkTo('/reports?tab=purchase-paid')}
         />
         <KPI
           icon={AlertTriangle}
@@ -106,6 +137,7 @@ const Dashboard = () => {
           value={data.low_stock_count}
           sub="produk perlu restock"
           tone="orange"
+          to={linkTo('/stock?tab=low')}
         />
         <KPI
           icon={CalendarClock}
@@ -113,6 +145,7 @@ const Dashboard = () => {
           value={expiring?.expiring?.length ?? 0}
           sub={`≤ ${expiring?.warning_days ?? 180} hari`}
           tone="orange"
+          to={linkTo('/stock?tab=batches')}
         />
         <KPI
           icon={AlertTriangle}
@@ -120,6 +153,7 @@ const Dashboard = () => {
           value={expiring?.expired?.length ?? 0}
           sub="batch perlu dibuang"
           tone="red"
+          to={linkTo('/stock?tab=batches')}
         />
       </div>
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Download, BarChart3 } from 'lucide-react';
 import { api, downloadFile } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
@@ -7,8 +8,9 @@ import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import useDebounce from '../hooks/useDebounce';
 import { formatCurrency, formatDate, todayIso, firstOfMonthIso } from '../utils/formatters';
-import { PAYMENT_LABELS } from '../utils/labels';
+import { PAYMENT_LABELS, PO_STATUS_LABELS } from '../utils/labels';
 
 const TABS = [
   { key: 'sales-summary', label: 'Penjualan Harian' },
@@ -16,6 +18,7 @@ const TABS = [
   { key: 'by-payment', label: 'Per Metode Bayar' },
   { key: 'gross-profit', label: 'Laba Kotor' },
   { key: 'profit-loss', label: 'Laba Rugi' },
+  { key: 'purchase-paid', label: 'Modal' },
   { key: 'top-products', label: 'Produk Terlaris' },
   { key: 'low-stock', label: 'Stok Minimum' },
   { key: 'stock-card', label: 'Kartu Stok' },
@@ -23,7 +26,9 @@ const TABS = [
 
 const Reports = () => {
   const toast = useToastContext();
-  const [tab, setTab] = useState('sales-summary');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const paramTab = searchParams.get('tab');
+  const [tab, setTab] = useState(() => (TABS.some((t) => t.key === paramTab) ? paramTab : 'sales-summary'));
   const [range, setRange] = useState({ from: firstOfMonthIso(), to: todayIso() });
   const [data, setData] = useState(null);
   const [dataTab, setDataTab] = useState(null);
@@ -31,6 +36,11 @@ const Reports = () => {
 
   const [products, setProducts] = useState([]);
   const [productId, setProductId] = useState('');
+
+  const [suppliers, setSuppliers] = useState([]);
+  const [supplierId, setSupplierId] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const search = useDebounce(searchInput, 350);
 
   const requestIdRef = useRef(0);
   const abortRef = useRef(null);
@@ -58,6 +68,11 @@ const Reports = () => {
         payload = await api.get(`/api/reports/stock-card/${productId}`, { from: range.from, to: range.to }, { signal: controller.signal });
       } else if (tab === 'low-stock') {
         payload = await api.get('/api/reports/low-stock', undefined, { signal: controller.signal });
+      } else if (tab === 'purchase-paid') {
+        const params = { from: range.from, to: range.to };
+        if (supplierId) params.supplier_id = supplierId;
+        if (search.trim()) params.search = search.trim();
+        payload = await api.get('/api/reports/purchase-paid', params, { signal: controller.signal });
       } else {
         payload = await api.get(`/api/reports/${tab}`, { from: range.from, to: range.to }, { signal: controller.signal });
       }
@@ -71,14 +86,28 @@ const Reports = () => {
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [tab, range, productId, toast]);
+  }, [tab, range, productId, supplierId, search, toast]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
+    if (searchParams.get('tab') !== tab) setSearchParams({ tab }, { replace: true });
+  }, [tab, searchParams, setSearchParams]);
+
+  // Ikuti perubahan URL (mis. tombol back/forward) saat komponen tetap ter-mount.
+  useEffect(() => {
+    const next = searchParams.get('tab');
+    if (TABS.some((t) => t.key === next)) setTab(next);
+  }, [searchParams]);
+
+  useEffect(() => {
     api.get('/api/products', { limit: 200 }).then((res) => setProducts(res.data)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    api.get('/api/suppliers').then((res) => setSuppliers(res)).catch(() => {});
   }, []);
 
   const exportCsv = async () => {
@@ -89,6 +118,10 @@ const Reports = () => {
         await downloadFile(`/api/reports/stock-card/${productId}`, `kartu-stok-${range.from}_${range.to}.csv`, params);
       } else if (tab === 'low-stock') {
         await downloadFile('/api/reports/low-stock', 'stok-minimum.csv', { format: 'csv' });
+      } else if (tab === 'purchase-paid') {
+        if (supplierId) params.supplier_id = supplierId;
+        if (search.trim()) params.search = search.trim();
+        await downloadFile('/api/reports/purchase-paid', `modal-pembelian-${range.from}_${range.to}.csv`, params);
       } else {
         await downloadFile(`/api/reports/${tab}`, `${tab}-${range.from}_${range.to}.csv`, params);
       }
@@ -308,6 +341,58 @@ const Reports = () => {
       );
     }
 
+    if (tab === 'purchase-paid') {
+      if (!data.summary) return <p className="text-sm text-slate-500 py-8 text-center">Data tidak tersedia</p>;
+      return (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+            {[
+              { label: 'Total Modal', value: formatCurrency(data.summary?.total_amount ?? 0), highlight: true },
+              { label: 'Jumlah PO', value: data.summary?.po_count ?? 0 },
+              { label: 'Total Item (qty)', value: data.summary?.item_qty ?? 0 },
+            ].map((kpi) => (
+              <div key={kpi.label} className="p-3 bg-white/5 rounded-ios-sm">
+                <div className="text-xs text-slate-400">{kpi.label}</div>
+                <div className={`text-lg font-semibold ${kpi.highlight ? 'text-ios-green' : 'text-white'}`}>{kpi.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-xs text-slate-500 mb-4">
+            Hanya PO yang sudah dibayar penuh ke supplier. Modal pembelian mengubah kas menjadi
+            persediaan (aset); bukan beban laba — HPP sudah otomatis dikurangkan saat barang terjual.
+          </p>
+
+          <Table
+            columns={[
+              { key: 'date', label: 'Tanggal' },
+              { key: 'code', label: 'Kode' },
+              { key: 'supplier', label: 'Supplier' },
+              { key: 'invoice', label: 'No. Invoice' },
+              { key: 'qty', label: 'Item (qty)', align: 'right' },
+              { key: 'total', label: 'Total', align: 'right' },
+              { key: 'paid', label: 'Dibayar', align: 'right' },
+              { key: 'status', label: 'Status Terima' },
+            ]}
+            empty={(data.rows || []).length === 0 ? 'Belum ada data' : undefined}
+          >
+            {(data.rows || []).map((row) => (
+              <tr key={row.id} className="hover:bg-white/5">
+                <td className="px-4 py-2 text-white">{formatDate(row.date)}</td>
+                <td className="px-4 py-2 font-mono text-xs text-slate-400">{row.code}</td>
+                <td className="px-4 py-2 text-white">{row.supplier_name || '-'}</td>
+                <td className="px-4 py-2 text-slate-400">{row.invoice_no || '-'}</td>
+                <td className="px-4 py-2 text-right text-slate-300">{row.qty_total}</td>
+                <td className="px-4 py-2 text-right text-white font-medium">{formatCurrency(row.total)}</td>
+                <td className="px-4 py-2 text-right text-ios-green">{formatCurrency(row.paid_amount)}</td>
+                <td className="px-4 py-2 text-slate-400">{PO_STATUS_LABELS[row.status] || row.status}</td>
+              </tr>
+            ))}
+          </Table>
+        </>
+      );
+    }
+
     if (tab === 'top-products') {
       return (
         <Table
@@ -426,6 +511,27 @@ const Reports = () => {
                 <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
               ))}
             </select>
+          ) : null}
+          {tab === 'purchase-paid' ? (
+            <>
+              <select
+                className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white focus:outline-none focus:border-ios-blue/60 min-w-[180px]"
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
+              >
+                <option value="">- Semua Supplier -</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="Cari kode/invoice"
+                className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-ios-blue/60"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+              />
+            </>
           ) : null}
           {tab !== 'low-stock' && (
             <>

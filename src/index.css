@@ -104,4 +104,75 @@ input[type='number'] {
   .no-print {
     display: none !important;
   }
+
+  /* Label barcode paket: hanya grid label yang tercetak. */
+  #barcode-print-area,
+  #barcode-print-area * {
+    visibility: visible !important;
+  }
+
+  #barcode-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+  }
+}
+
+/* Grid label barcode untuk pratinjau & cetak (40x30mm default). */
+.barcode-label {
+  box-sizing: border-box;
+  width: 40mm;
+  height: 30mm;
+  padding: 1.5mm;
+  background: #ffffff;
+  color: #000000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  overflow: hidden;
+  border: 1px dashed #cbd5e1;
+}
+
+@media print {
+  .barcode-label {
+    border: none;
+  }
+}
+
+.barcode-label .barcode-label-name {
+  font-size: 8px;
+  font-weight: 600;
+  line-height: 1.1;
+  text-align: center;
+  max-height: 14px;
+  overflow: hidden;
+}
+
+.barcode-label .barcode-label-svg {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  overflow: hidden;
+}
+
+.barcode-label .barcode-label-svg svg {
+  width: 100%;
+  height: 100%;
+}
+
+.barcode-label .barcode-label-code {
+  font-size: 8px;
+  font-family: 'Courier New', Courier, monospace;
+  letter-spacing: 1px;
+}
+
+.barcode-label .barcode-label-price {
+  font-size: 9px;
+  font-weight: 700;
 }

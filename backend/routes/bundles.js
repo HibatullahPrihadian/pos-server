@@ -6,10 +6,42 @@ const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { requireString, cleanString, toBool } = require('../utils/validate');
 const { logAudit } = require('../utils/audit');
+const {
+  INTERNAL_PREFIX,
+  isValidEan13,
+  generateEan13,
+  nextInternalBarcode,
+  isBarcodeTaken,
+} = require('../utils/barcode');
+const bwipjs = require('bwip-js');
 
 const router = express.Router();
 
 router.use(verifyJwt);
+
+// Render SVG EAN-13 memakai bwip-js. Mengembalikan string SVG.
+const renderEan13Svg = (code) =>
+  bwipjs.toSVG({
+    bcid: 'ean13',
+    text: code,
+    scale: 3,
+    height: 12,
+    includetext: false,
+    backgroundcolor: 'FFFFFF',
+  });
+
+// Validasi barcode paket: kosong diizinkan; bila EAN-13 internal wajib check digit benar.
+const validateBundleBarcode = async (runner, barcode, excludeId = null) => {
+  if (!barcode) return;
+  if (barcode.startsWith(INTERNAL_PREFIX)) {
+    if (!isValidEan13(barcode)) {
+      throw new HttpError(400, 'Barcode EAN-13 internal tidak valid (check digit salah)');
+    }
+  }
+  if (await isBarcodeTaken(runner, barcode, excludeId)) {
+    throw new HttpError(409, 'Barcode sudah dipakai paket lain');
+  }
+};
 
 const SELECT_BUNDLE = `
   SELECT b.*,
@@ -78,6 +110,75 @@ const loadItems = async (runner, bundleId) => {
 // =========================================================
 // Barcode paket. Ditaruh sebelum /:id agar tidak tertangkap sebagai id.
 // =========================================================
+
+// Generate kode EAN-13 internal unik. Harus di atas /barcode/:barcode agar
+// 'generate' tidak dibaca sebagai parameter :barcode.
+router.get('/barcode/generate', requireRole('admin'), async (req, res, next) => {
+  try {
+    let barcode = await nextInternalBarcode(pool, INTERNAL_PREFIX);
+    // Antisipasi bentrok (mis. barcode manual) dengan mencoba ulang beberapa kali.
+    for (let attempt = 0; attempt < 5 && (await isBarcodeTaken(pool, barcode)); attempt += 1) {
+      barcode = generateEan13(INTERNAL_PREFIX);
+    }
+    if (await isBarcodeTaken(pool, barcode)) {
+      throw new HttpError(409, 'Gagal membuat barcode unik, coba lagi');
+    }
+    res.json({ barcode });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Render SVG barcode satu paket (berdasarkan barcode tersimpan).
+router.get('/:id/barcode.svg', requireRole('admin'), async (req, res, next) => {
+  try {
+    const id = toInt(req.params.id, 0);
+    if (id <= 0) throw new HttpError(404, 'Paket tidak ditemukan');
+
+    const result = await pool.query('SELECT barcode FROM bundles WHERE id = $1', [id]);
+    const bundle = result.rows[0];
+    if (!bundle) throw new HttpError(404, 'Paket tidak ditemukan');
+    if (!bundle.barcode) throw new HttpError(404, 'Paket belum memiliki barcode');
+
+    const svg = renderEan13Svg(bundle.barcode);
+    res.type('image/svg+xml').send(svg);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Render batch SVG untuk banyak paket sekaligus (cetak label massal).
+router.post('/barcodes/render', requireRole('admin'), async (req, res, next) => {
+  try {
+    const rawIds = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids = [...new Set(rawIds.map((id) => toInt(id, 0)).filter((id) => id > 0))];
+    if (ids.length === 0) throw new HttpError(400, 'Pilih minimal satu paket');
+    if (ids.length > 200) throw new HttpError(400, 'Maksimal 200 label per cetak');
+
+    const result = await pool.query(
+      `SELECT id, name, sku, barcode, price FROM bundles
+       WHERE id = ANY($1::int[]) AND barcode IS NOT NULL AND barcode <> ''
+       ORDER BY name`,
+      [ids]
+    );
+
+    const items = result.rows.map((row) => {
+      let svg = null;
+      try {
+        svg = renderEan13Svg(row.barcode);
+      } catch {
+        // Barcode non-EAN (mis. hasil scan pabrik) tidak bisa dirender EAN-13.
+        svg = null;
+      }
+      return { id: row.id, name: row.name, sku: row.sku, code: row.barcode, price: Number(row.price), svg };
+    });
+
+    res.json({ items });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/barcode/:barcode', async (req, res, next) => {
   try {
     const barcode = cleanString(req.params.barcode, 50);
@@ -139,6 +240,7 @@ router.post('/', requireRole('admin'), async (req, res, next) => {
 
     const created = await withTransaction(async (client) => {
       await assertComponentsExist(client, items);
+      await validateBundleBarcode(client, barcode);
       const result = await client.query(
         `INSERT INTO bundles (sku, name, barcode, price, is_active)
          VALUES ($1, $2, $3, $4, $5) RETURNING *`,
@@ -191,6 +293,8 @@ router.put('/:id', requireRole('admin'), async (req, res, next) => {
     if (keys.length === 0 && !hasItems) throw new HttpError(400, 'Tidak ada perubahan');
 
     await withTransaction(async (client) => {
+      if ('barcode' in value) await validateBundleBarcode(client, value.barcode, req.params.id);
+
       if (keys.length > 0) {
         const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
         const params = keys.map((key) => value[key]);
