@@ -23,6 +23,9 @@ const PERMISSIONS = [
   'bundle.manage',
   'promotion.manage',
   'member.manage',
+  'customer.manage',
+  'invoice.view',
+  'invoice.manage',
   'expense.manage',
   'report.view',
   'user.manage',
@@ -46,6 +49,9 @@ const PERMISSION_LABELS = {
   'bundle.manage': 'Kelola paket',
   'promotion.manage': 'Kelola promo',
   'member.manage': 'Kelola member',
+  'customer.manage': 'Kelola pelanggan grosir',
+  'invoice.view': 'Lihat piutang & invoice grosir',
+  'invoice.manage': 'Terbitkan invoice kredit & catat pembayaran',
   'expense.manage': 'Kelola beban operasional',
   'report.view': 'Lihat laporan',
   'user.manage': 'Kelola pengguna',
@@ -61,6 +67,9 @@ const ROLE_PRESETS = {
     'product.view',
     'stock.view',
     'member.manage',
+    // Kasir boleh MELIHAT piutang, tapi tidak boleh menerbitkan kredit/mencatat
+    // pembayaran (invoice.manage) — keputusan pemilik/admin.
+    'invoice.view',
   ],
   // Gudang: boleh jualan di POS (pos.use/shift.use), kelola produk & stok,
   // buat/terima PO. TIDAK boleh bayar ke supplier, kelola supplier/konsinyasi/

@@ -22,6 +22,8 @@ import StockOpname from './pages/StockOpname';
 import Purchases from './pages/Purchases';
 import Expenses from './pages/Expenses';
 import Members from './pages/Members';
+import Customers from './pages/Customers';
+import Invoices from './pages/Invoices';
 import Shifts from './pages/Shifts';
 import Reports from './pages/Reports';
 import Users from './pages/Users';
@@ -62,6 +64,8 @@ function App() {
                 <Route path="/expenses" element={<Page permission="expense.manage"><Expenses /></Page>} />
 
                 <Route path="/members" element={<Page permission="member.manage"><Members /></Page>} />
+                <Route path="/customers" element={<Page permission="customer.manage"><Customers /></Page>} />
+                <Route path="/invoices" element={<Page permission="invoice.view"><Invoices /></Page>} />
                 <Route path="/reports" element={<Page permission="report.view"><Reports /></Page>} />
 
                 <Route path="/attendance" element={<Page permission="attendance.self"><Attendance /></Page>} />

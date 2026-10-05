@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ShoppingCart, Receipt, Package, Tags, Truck, Boxes,
   ClipboardList, ShoppingBag, Users, Clock, BarChart3, UserCog, Settings,
   LogOut, ChevronLeft, ChevronRight, Lock, Store, BadgePercent, PackagePlus,
-  HandCoins, CalendarCheck, LogIn, LogOut as LogOutIcon, Wallet,
+  HandCoins, CalendarCheck, LogIn, LogOut as LogOutIcon, Wallet, Building2, FileText,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../api/client';
@@ -41,6 +41,8 @@ const MENU = [
     section: 'Pelanggan & Laporan',
     items: [
       { path: '/members', name: 'Member', icon: Users, permission: 'member.manage' },
+      { path: '/customers', name: 'Pelanggan Grosir', icon: Building2, permission: 'customer.manage' },
+      { path: '/invoices', name: 'Invoice Grosir', icon: FileText, permission: 'invoice.view' },
       { path: '/reports', name: 'Laporan', icon: BarChart3, permission: 'report.view' },
     ],
   },

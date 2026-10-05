@@ -240,6 +240,61 @@ const restoreSaleItemBatches = async (client, item, qty) => {
   }
 };
 
+// Kembalikan stok seluruh item sebuah penjualan saat void (produk & paket).
+// Dipakai bersama oleh void penjualan (sales.js) dan void invoice kredit
+// (invoices.js) agar logika restock/HPP tidak menyimpang antar jalur.
+// Hanya qty yang belum pernah diretur yang dikembalikan (retur sudah menambah stok).
+const restoreSaleStock = async (client, sale, { userId = null, type = 'void' } = {}) => {
+  const { applyStockMovement } = require('./stock');
+  const note = `Void ${sale.invoice_no}`;
+  const items = await client.query('SELECT * FROM sale_items WHERE sale_id = $1', [sale.id]);
+
+  for (const item of items.rows) {
+    const unreturnedQty = item.qty - item.returned_qty;
+    if (unreturnedQty <= 0) continue;
+
+    await restoreSaleItemBatches(client, item, unreturnedQty);
+
+    if (item.bundle_id) {
+      const components = await client.query(
+        `SELECT bi.product_id, bi.qty, p.cost_price, p.name
+         FROM bundle_items bi
+         JOIN products p ON p.id = bi.product_id
+         WHERE bi.bundle_id = $1`,
+        [item.bundle_id]
+      );
+      for (const component of components.rows) {
+        await applyStockMovement(client, {
+          productId: component.product_id,
+          qtyChange: component.qty * unreturnedQty,
+          type,
+          refType: 'sale',
+          refId: sale.id,
+          unitCost: Number(component.cost_price),
+          note,
+          userId,
+          allowNegative: true,
+        });
+      }
+      continue;
+    }
+
+    const unreturnedBaseQty = Math.round((item.base_qty / item.qty) * unreturnedQty);
+    await applyStockMovement(client, {
+      productId: item.product_id,
+      qtyChange: unreturnedBaseQty,
+      type,
+      refType: 'sale',
+      refId: sale.id,
+      // cost_price tersimpan per satuan jual; kartu stok memakai satuan dasar.
+      unitCost: Math.round(item.cost_price / (item.base_qty / item.qty)),
+      note,
+      userId,
+      allowNegative: true,
+    });
+  }
+};
+
 module.exports = {
   allocateFefo,
   restoreToBatch,
@@ -249,4 +304,5 @@ module.exports = {
   recordSaleItemBatch,
   recordShortfall,
   restoreSaleItemBatches,
+  restoreSaleStock,
 };

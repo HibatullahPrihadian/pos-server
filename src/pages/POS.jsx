@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Search, Plus, Minus, Trash2, ScanLine, ShoppingCart, UserPlus, X,
   Banknote, QrCode, CreditCard, Landmark, Printer, CheckCircle2, Coins,
-  Percent,
+  Percent, Building2,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -30,10 +30,13 @@ const PAY_METHODS = [
   { key: 'transfer', label: 'Transfer', icon: Landmark },
 ];
 
+const TERM_OPTIONS = [0, 7, 14, 30, 60];
+
 const POS = () => {
   const toast = useToastContext();
   const { user, can } = useAuth();
   const canCreateMember = can('member.manage');
+  const canCredit = can('invoice.manage');
   const { settings } = useSettings();
   const cart = useCart();
 
@@ -60,6 +63,11 @@ const POS = () => {
 
   const [payOpen, setPayOpen] = useState(false);
   const [payments, setPayments] = useState([{ method: 'cash', amount: '', reference: '' }]);
+  const [creditMode, setCreditMode] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [customerId, setCustomerId] = useState('');
+  const [payTerm, setPayTerm] = useState('30');
+  const [dueDate, setDueDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [receiptSale, setReceiptSale] = useState(null);
   const [receiptChange, setReceiptChange] = useState(0);
@@ -195,6 +203,14 @@ const POS = () => {
       .catch(() => {});
   }, [debouncedMemberSearch]);
 
+  // Pelanggan grosir (dropdown) hanya dimuat saat mode kredit aktif.
+  useEffect(() => {
+    if (!creditMode) return;
+    api.get('/api/customers', { is_active: true, limit: 200 })
+      .then((res) => setCustomers(res.data))
+      .catch(() => {});
+  }, [creditMode]);
+
   // Bersihkan editor diskon bila item hilang (mis. qty turun ke 0) atau keranjang kosong.
   useEffect(() => {
     if (cart.items.length === 0) { setDiscountEditorKey(null); return; }
@@ -302,7 +318,17 @@ const POS = () => {
     if (cart.items.length === 0) return toast.warning('Keranjang masih kosong');
     const total = estimatedTotal;
     setPayments([{ method: 'cash', amount: String(total), reference: '' }]);
+    setCreditMode(false);
+    setCustomerId('');
+    setPayTerm('30');
+    setDueDate('');
     setPayOpen(true);
+  };
+
+  const selectCreditCustomer = (id) => {
+    setCustomerId(id);
+    const selected = customers.find((c) => String(c.id) === String(id));
+    if (selected) setPayTerm(String(selected.payment_term_days ?? 0));
   };
 
   const openShift = async () => {
@@ -329,6 +355,7 @@ const POS = () => {
   };
 
   const checkout = async () => {
+    if (creditMode && !customerId) return toast.warning('Pilih pelanggan grosir untuk penjualan kredit');
     setSubmitting(true);
     try {
       const payload = {
@@ -346,6 +373,10 @@ const POS = () => {
         )),
         txn_discount: cart.txnDiscount,
         redeem_points: cart.redeemPoints,
+        is_credit: creditMode,
+        customer_id: creditMode ? Number(customerId) : null,
+        due_date: creditMode && dueDate ? dueDate : undefined,
+        payment_term_days: creditMode && !dueDate ? Number(payTerm) || 0 : undefined,
         payments: payments
           .filter((p) => parseMoney(p.amount) > 0)
           .map((p) => ({ method: p.method, amount: parseMoney(p.amount), reference: p.reference })),
@@ -359,6 +390,9 @@ const POS = () => {
       setPayOpen(false);
       cart.clear();
       setDiscountEditorKey(null);
+      setCreditMode(false);
+      setCustomerId('');
+      setDueDate('');
       loadProducts();
       toast.success(`Transaksi ${result.sale.invoice_no} berhasil`);
     } catch (err) {
@@ -744,14 +778,87 @@ const POS = () => {
             </div>
             <div className="flex gap-2">
               <Button variant="neutral" onClick={() => setPayOpen(false)}>Batal</Button>
-              <Button variant="success" onClick={checkout} disabled={submitting || paidTotal < estimatedTotal}>
-                <CheckCircle2 size={16} /> {submitting ? 'Memproses...' : 'Bayar & Simpan'}
+              <Button
+                variant={creditMode ? 'warning' : 'success'}
+                onClick={checkout}
+                disabled={
+                  submitting
+                  || (creditMode
+                    ? (!customerId || paidTotal > estimatedTotal)
+                    : paidTotal < estimatedTotal)
+                }
+              >
+                <CheckCircle2 size={16} />
+                {submitting ? 'Memproses...' : creditMode ? 'Terbitkan Kredit' : 'Bayar & Simpan'}
               </Button>
             </div>
           </div>
         }
       >
         <div className="space-y-4">
+          {canCredit && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !creditMode;
+                setCreditMode(next);
+                if (next) {
+                  setPayments([{ method: 'cash', amount: '', reference: '' }]);
+                } else {
+                  setPayments([{ method: 'cash', amount: String(estimatedTotal), reference: '' }]);
+                }
+              }}
+              className={`w-full flex items-center justify-between px-4 py-3 rounded-ios-sm border transition-colors ${creditMode ? 'bg-ios-orange/15 border-ios-orange/50 text-ios-orange' : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'}`}
+            >
+              <span className="flex items-center gap-2 text-sm font-medium">
+                <Building2 size={16} /> Jual Kredit (Grosir)
+              </span>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${creditMode ? 'border-ios-orange/50 bg-ios-orange/20' : 'border-white/15 bg-white/5'}`}>
+                {creditMode ? 'AKTIF' : 'Nonaktif'}
+              </span>
+            </button>
+          )}
+
+          {creditMode && (
+            <div className="space-y-3 p-3 rounded-ios-sm bg-slate-950/40 border border-ios-orange/30">
+              <Input
+                as="select"
+                label="Pelanggan Grosir *"
+                value={customerId}
+                onChange={(e) => selectCreditCustomer(e.target.value)}
+              >
+                <option value="">-- Pilih pelanggan --</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.code}){c.payment_term_days > 0 ? ` · Net ${c.payment_term_days}` : ''}
+                  </option>
+                ))}
+              </Input>
+              <div className="grid grid-cols-2 gap-3">
+                <Input
+                  as="select"
+                  label="Termin"
+                  value={payTerm}
+                  onChange={(e) => { setPayTerm(e.target.value); setDueDate(''); }}
+                  disabled={Boolean(dueDate)}
+                >
+                  {TERM_OPTIONS.map((d) => (
+                    <option key={d} value={d}>{d === 0 ? 'Tunai (0 hari)' : `Net ${d} hari`}</option>
+                  ))}
+                </Input>
+                <Input
+                  label="Atau Tanggal Jatuh Tempo"
+                  type="date"
+                  value={dueDate}
+                  onChange={(e) => setDueDate(e.target.value)}
+                />
+              </div>
+              <p className="text-xs text-slate-500">
+                Pembayaran di bawah ini opsional (uang muka). Sisa tagihan tercatat sebagai piutang dan tidak menambah kas shift.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-4 gap-2">
             {PAY_METHODS.map(({ key, label, icon: Icon }) => (
               <button
@@ -778,7 +885,7 @@ const POS = () => {
                   {PAY_METHODS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                 </Input>
                 <Input
-                  label={index === 0 ? 'Jumlah' : ''}
+                  label={index === 0 ? (creditMode ? 'Uang Muka' : 'Jumlah') : ''}
                   type="number"
                   className="flex-1"
                   value={payment.amount}
@@ -793,28 +900,30 @@ const POS = () => {
             ))}
           </div>
 
-          <div className="flex justify-between items-center">
-            <Button
-              variant="neutral"
-              size="sm"
-              onClick={() => setPayments([...payments, { method: 'qris', amount: '', reference: '' }])}
-            >
-              <Plus size={14} /> Split Pembayaran
-            </Button>
-            {['cash', 'qris', 'debit', 'transfer'].includes(payments[0]?.method) && payments.length === 1 && (
-              <div className="flex gap-1">
-                {[50000, 100000, 150000, 200000].map((amount) => (
-                  <button
-                    key={amount}
-                    onClick={() => setPayments([{ ...payments[0], amount: String(amount) }])}
-                    className="px-2 py-1 text-xs bg-white/5 hover:bg-white/10 rounded text-slate-300"
-                  >
-                    {amount / 1000}rb
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {!creditMode && (
+            <div className="flex justify-between items-center">
+              <Button
+                variant="neutral"
+                size="sm"
+                onClick={() => setPayments([...payments, { method: 'qris', amount: '', reference: '' }])}
+              >
+                <Plus size={14} /> Split Pembayaran
+              </Button>
+              {['cash', 'qris', 'debit', 'transfer'].includes(payments[0]?.method) && payments.length === 1 && (
+                <div className="flex gap-1">
+                  {[50000, 100000, 150000, 200000].map((amount) => (
+                    <button
+                      key={amount}
+                      onClick={() => setPayments([{ ...payments[0], amount: String(amount) }])}
+                      className="px-2 py-1 text-xs bg-white/5 hover:bg-white/10 rounded text-slate-300"
+                    >
+                      {amount / 1000}rb
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {payments.some((p) => p.method === 'qris') && settings?.qris_image_path && (
             <div className="flex flex-col items-center p-3 bg-white rounded-ios-sm">
@@ -825,13 +934,17 @@ const POS = () => {
 
           <div className="p-3 rounded-ios-sm bg-white/5 space-y-1 text-sm">
             <div className="flex justify-between">
-              <span className="text-slate-400">Dibayar</span>
+              <span className="text-slate-400">{creditMode ? 'Uang Muka' : 'Dibayar'}</span>
               <span className="text-white">{formatCurrency(paidTotal)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">{change >= 0 ? 'Kembalian' : 'Kurang'}</span>
-              <span className={change >= 0 ? 'text-ios-green font-semibold' : 'text-ios-red font-semibold'}>
-                {formatCurrency(Math.abs(change))}
+              <span className="text-slate-400">{creditMode ? 'Sisa Piutang' : (change >= 0 ? 'Kembalian' : 'Kurang')}</span>
+              <span className={
+                creditMode
+                  ? 'text-ios-orange font-semibold'
+                  : (change >= 0 ? 'text-ios-green font-semibold' : 'text-ios-red font-semibold')
+              }>
+                {creditMode ? formatCurrency(Math.max(0, estimatedTotal - paidTotal)) : formatCurrency(Math.abs(change))}
               </span>
             </div>
           </div>

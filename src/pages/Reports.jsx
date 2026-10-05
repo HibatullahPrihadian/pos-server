@@ -299,16 +299,21 @@ const Reports = () => {
               <h4 className="text-sm font-semibold text-white mb-2">Informasi (tidak mengurangi laba)</h4>
               <div className="space-y-2">
                 <div className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm">
-                  <span className="text-sm text-slate-300">Pembelian Stok</span>
+                  <span className="text-sm text-slate-300">Pembelian Stok (total PO)</span>
                   <span className="text-white">{formatCurrency(data.info?.purchase_total ?? 0)}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm">
+                  <span className="text-sm text-slate-300">Sudah Dibayar (Modal)</span>
+                  <span className="text-white">{formatCurrency(data.info?.purchase_paid ?? 0)}</span>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm">
                   <span className="text-sm text-slate-300">Payout Penitip (Konsinyasi)</span>
                   <span className="text-white">{formatCurrency(data.info?.consignment_payout ?? 0)}</span>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Pembelian stok mengubah kas menjadi persediaan (aset), bukan beban. HPP sudah otomatis
-                  dikurangkan saat barang terjual, sehingga tidak dihitung ulang.
+                  Pembelian Stok = total PO periode ini; Sudah Dibayar (Modal) = PO yang sudah lunas
+                  penuh. Selisihnya adalah PO yang belum lunas penuh. Keduanya mengubah kas menjadi
+                  persediaan (aset), bukan beban; HPP sudah otomatis dikurangkan saat barang terjual.
                 </p>
               </div>
             </div>

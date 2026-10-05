@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   TrendingUp, Receipt, PiggyBank, AlertTriangle, Clock, ShoppingBag, ArrowRight, CalendarClock, Wallet,
+  HandCoins,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
@@ -80,6 +81,7 @@ const Dashboard = () => {
   const linkTo = (path) => {
     if (path.startsWith('/reports') && !can('report.view')) return undefined;
     if (path.startsWith('/stock') && !can('stock.view')) return undefined;
+    if (path.startsWith('/invoices') && !can('invoice.view')) return undefined;
     return path;
   };
 
@@ -159,6 +161,14 @@ const Dashboard = () => {
           sub="batch perlu dibuang"
           tone="red"
           to={linkTo('/stock?tab=batches')}
+        />
+        <KPI
+          icon={HandCoins}
+          label="Piutang Grosir"
+          value={formatCurrency(data.receivable?.outstanding_total ?? 0)}
+          sub={`Lewat jatuh tempo: ${formatCurrency(data.receivable?.overdue_total ?? 0)}`}
+          tone={(data.receivable?.overdue_total ?? 0) > 0 ? 'red' : 'orange'}
+          to={linkTo('/invoices')}
         />
       </div>
 

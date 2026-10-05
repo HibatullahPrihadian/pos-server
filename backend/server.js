@@ -56,6 +56,8 @@ app.use('/api/bundles', require('./routes/bundles'));
 app.use('/api/consignment', require('./routes/consignment'));
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/members', require('./routes/members'));
+app.use('/api/customers', require('./routes/customers'));
+app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/stock', require('./routes/stock'));
 app.use('/api/purchases', require('./routes/purchases'));
 app.use('/api/expenses', require('./routes/expenses'));
@@ -124,6 +126,20 @@ const assertFeatureSchema = async () => {
             WHERE conname = 'users_role_check'
               AND pg_get_constraintdef(oid) LIKE '%gudang%'`,
     },
+    // P6: invoice grosir kredit & piutang.
+    { name: 'tabel customers', sql: "SELECT to_regclass('public.customers') AS ok" },
+    { name: 'tabel invoice_payments', sql: "SELECT to_regclass('public.invoice_payments') AS ok" },
+    {
+      name: 'kolom sales.customer_id/is_credit/due_date/paid_amount/payment_status',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'sales'
+              AND column_name IN ('customer_id', 'is_credit', 'due_date', 'paid_amount', 'payment_status')`,
+    },
+    {
+      name: 'CHECK sales.payment_status',
+      sql: `SELECT COUNT(*)::int AS ok FROM pg_constraint
+            WHERE conname = 'sales_payment_status_check'`,
+    },
   ];
 
   for (const check of required) {
@@ -131,7 +147,8 @@ const assertFeatureSchema = async () => {
     const row = result.rows[0];
     const expected = check.name.startsWith('kolom sale_items.promo_id') ? 2
       : check.name.startsWith('kolom products.is_consignment') ? 2
-        : null;
+        : check.name.startsWith('kolom sales.customer_id') ? 5
+          : null;
     const ok = expected === null ? Boolean(row.ok) : row.ok === expected;
     if (!ok) {
       throw new Error(

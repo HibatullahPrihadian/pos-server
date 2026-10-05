@@ -20,7 +20,7 @@ module.exports = {
     'plugin:react/jsx-runtime',
     'plugin:react-hooks/recommended',
   ],
-  ignorePatterns: ['dist', 'node_modules', 'backend/node_modules', '*.config.js', '.eslintrc.cjs'],
+  ignorePatterns: ['dist', 'node_modules', 'backend/node_modules', 'contoh-web-Invoice', '*.config.js', '.eslintrc.cjs'],
   rules: {
     'no-unused-vars': ['warn', { argsIgnorePattern: '^_|^node$' }],
     'react/prop-types': 'off',

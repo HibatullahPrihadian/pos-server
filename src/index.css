@@ -119,6 +119,405 @@ input[type='number'] {
     padding: 0;
     background: #ffffff;
   }
+
+  /* Invoice A4 grosir: hanya area invoice yang tercetak. */
+  #invoice-print-area,
+  #invoice-print-area * {
+    visibility: visible !important;
+  }
+
+  /* Catatan: @page global tetap `margin: 0` agar struk & label barcode tidak
+     berubah. Lembar invoice memakai padding internal untuk margin cetak. */
+  #invoice-print-area {
+    display: block !important;
+    width: 210mm;
+    min-height: 0;
+    margin: 0;
+    padding: 14mm 15mm;
+    background: #ffffff;
+  }
+
+  #invoice-print-area,
+  #invoice-print-area * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Saat mencetak invoice, keluarkan seluruh aplikasi dari alur dokumen agar
+     tidak menyisakan halaman kosong. Portal #invoice-print-area ada di luar
+     #root, jadi tetap tercetak. Struk/barcode tidak terdampak (class hanya
+     aktif saat pratinjau invoice terbuka). */
+  body.invoice-printing #root {
+    display: none !important;
+  }
+
+  #invoice-print-area .invoice-accent-bar {
+    margin: -14mm -15mm 5mm -15mm;
+  }
+}
+
+/* Lembar cetak disembunyikan di layar; bukan position:fixed agar tidak
+   merusak containing block saat @media print. */
+.invoice-sheet-print {
+  display: none;
+}
+
+/* Invoice A4 untuk pratinjau & cetak. */
+.invoice-sheet {
+  position: relative;
+  box-sizing: border-box;
+  width: 210mm;
+  min-height: 297mm;
+  padding: 14mm 15mm;
+  background: #ffffff;
+  color: #0f172a;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.invoice-accent-bar {
+  display: flex;
+  height: 6px;
+  margin: -14mm -15mm 5mm -15mm;
+  overflow: hidden;
+  border-radius: 0 0 2px 2px;
+}
+
+.invoice-accent-1,
+.invoice-accent-2,
+.invoice-accent-3 {
+  flex: 1;
+}
+
+.invoice-accent-1 { background: #0a84ff; }
+.invoice-accent-2 { background: #64d2ff; }
+.invoice-accent-3 { background: #30d158; }
+
+.invoice-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.invoice-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.invoice-brand-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #0a84ff;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.invoice-store-name {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #0f172a;
+}
+
+.invoice-store-tagline {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #0a84ff;
+  margin-top: 2px;
+}
+
+.invoice-store-meta {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 10px;
+}
+
+.invoice-store-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.invoice-store-line svg {
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.invoice-title {
+  text-align: right;
+}
+
+.invoice-title-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.invoice-no {
+  font-family: 'Courier New', Courier, monospace;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 6px;
+}
+
+.invoice-muted {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.invoice-date {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.invoice-strong {
+  font-weight: 600;
+}
+
+.invoice-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #94a3b8;
+  margin-bottom: 3px;
+}
+
+.invoice-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.invoice-badge-paid {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+
+.invoice-badge-partial {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.invoice-badge-unpaid {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fecaca;
+}
+
+.invoice-overdue {
+  margin-top: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #b00020;
+}
+
+.invoice-parties {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+
+.invoice-parties-right {
+  text-align: right;
+  min-width: 40mm;
+}
+
+.invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+}
+
+.invoice-table th,
+.invoice-table td {
+  border: 1px solid #e2e8f0;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.invoice-table th {
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.invoice-col-no {
+  width: 26px;
+  text-align: center;
+}
+
+.invoice-item-name {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.invoice-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.invoice-empty {
+  text-align: center;
+  color: #94a3b8;
+}
+
+.invoice-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.invoice-recap {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.invoice-recap-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.invoice-terbilang {
+  margin-bottom: 10px;
+}
+
+.invoice-terbilang-text {
+  font-style: italic;
+  color: #334155;
+}
+
+.invoice-note {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 10px;
+}
+
+.invoice-totals {
+  width: 72mm;
+  flex-shrink: 0;
+}
+
+.invoice-total-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  color: #334155;
+}
+
+.invoice-grand {
+  margin-top: 5px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.invoice-paid {
+  color: #047857;
+  font-weight: 600;
+}
+
+.invoice-outstanding {
+  font-weight: 700;
+  color: #b00020;
+}
+
+.invoice-payments {
+  margin-bottom: 16px;
+}
+
+.invoice-payment-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.invoice-payment-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 10px;
+  color: #334155;
+}
+
+.invoice-sign {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 26px;
+  gap: 40px;
+}
+
+.invoice-sign-col {
+  text-align: center;
+  min-width: 55mm;
+}
+
+.invoice-sign-space {
+  height: 46px;
+}
+
+.invoice-sign-line {
+  font-size: 10px;
+  color: #475569;
+}
+
+.invoice-footer {
+  margin-top: 20px;
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 6px;
+  font-size: 10px;
+  color: #94a3b8;
+  text-align: center;
 }
 
 /* Grid label barcode untuk pratinjau & cetak (40x30mm default). */

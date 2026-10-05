@@ -96,6 +96,11 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
       const sale = saleResult.rows[0];
       if (!sale) throw new HttpError(404, 'Transaksi tidak ditemukan');
       if (sale.status !== 'completed') throw new HttpError(400, 'Transaksi void tidak dapat diretur');
+      // Invoice kredit tidak boleh diretur lewat jalur kas (refund tunai akan
+      // menciptakan kas yang tidak pernah diterima). Gunakan void invoice kredit.
+      if (sale.is_credit) {
+        throw new HttpError(400, 'Invoice kredit tidak dapat diretur lewat jalur kas; gunakan void invoice grosir');
+      }
 
       const code = await nextDocNumber(client, 'RET');
       let total = 0;

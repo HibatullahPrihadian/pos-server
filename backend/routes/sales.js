@@ -2,12 +2,14 @@ const express = require('express');
 const pool = require('../db');
 const { withTransaction } = require('../db');
 const { verifyJwt, requirePermission } = require('../middleware/auth');
+const { hasPermission } = require('../utils/permissions');
+const { APP_TIMEZONE } = require('../utils/receivables');
 const { HttpError } = require('../middleware/error');
 const { getPagination, paginated, toInt } = require('../utils/pagination');
 const { cleanString, isValidDate } = require('../utils/validate');
 const { nextDocNumber } = require('../utils/invoice');
 const { applyStockMovement } = require('../utils/stock');
-const { allocateFefo, recordSaleItemBatch, recordShortfall, restoreSaleItemBatches } = require('../utils/batches');
+const { allocateFefo, recordSaleItemBatch, recordShortfall, restoreSaleStock } = require('../utils/batches');
 const { extractTax, pointsEarned } = require('../utils/money');
 const { resolveItemsEffectivePricing } = require('../utils/item_pricing');
 const { getSettings } = require('../utils/settings');
@@ -25,10 +27,12 @@ const MAX_LINE_QTY = 100000;
 
 const SALE_SELECT = `
   SELECT s.*, u.full_name AS cashier_name, m.name AS member_name, m.code AS member_code,
+         c.name AS customer_name, c.code AS customer_code,
          (SELECT STRING_AGG(DISTINCT sp.method, ',') FROM sale_payments sp WHERE sp.sale_id = s.id) AS methods
   FROM sales s
   LEFT JOIN users u ON u.id = s.cashier_id
   LEFT JOIN members m ON m.id = s.member_id
+  LEFT JOIN customers c ON c.id = s.customer_id
 `;
 
 // =========================================================
@@ -44,12 +48,27 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
     const redeemPoints = Math.max(0, Math.round(Number(body.redeem_points) || 0));
     const txnDiscountInput = Math.max(0, Math.round(Number(body.txn_discount) || 0));
 
+    // Penjualan kredit grosir: pembayaran opsional (uang muka), wajib pelanggan,
+    // dan butuh izin invoice.manage (memberi kredit = keputusan pemilik/admin).
+    const isCredit = body.is_credit === true;
+    const customerId = toInt(body.customer_id, 0) || null;
+    const termDaysInput = body.payment_term_days !== undefined && body.payment_term_days !== null
+      ? Math.round(Number(body.payment_term_days))
+      : null;
+    const dueDateInput = cleanString(body.due_date, 10);
+
+    if (isCredit && !hasPermission(req.user, 'invoice.manage')) {
+      throw new HttpError(403, 'Akses ditolak: izin menerbitkan invoice kredit tidak mencukupi');
+    }
+    if (isCredit && !customerId) throw new HttpError(400, 'Pelanggan grosir wajib dipilih untuk penjualan kredit');
+    if (!isCredit && customerId) throw new HttpError(400, 'customer_id hanya untuk penjualan kredit');
+
     if (!Array.isArray(body.items) || body.items.length === 0) {
       throw new HttpError(400, 'Keranjang kosong');
     }
 
     const payments = Array.isArray(body.payments) ? body.payments : [];
-    if (payments.length === 0) throw new HttpError(400, 'Metode pembayaran wajib diisi');
+    if (!isCredit && payments.length === 0) throw new HttpError(400, 'Metode pembayaran wajib diisi');
     payments.forEach((p) => {
       if (!PAYMENT_METHODS.has(p?.method)) throw new HttpError(400, 'Metode pembayaran tidak valid');
       if (!Number.isFinite(Number(p?.amount)) || Number(p.amount) <= 0) {
@@ -80,6 +99,18 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
       }
 
       const isMember = Boolean(member);
+
+      // Pelanggan grosir (wajib untuk kredit).
+      let customer = null;
+      if (customerId) {
+        const customerResult = await client.query(
+          'SELECT * FROM customers WHERE id = $1 FOR UPDATE',
+          [customerId]
+        );
+        customer = customerResult.rows[0];
+        if (!customer) throw new HttpError(404, 'Pelanggan grosir tidak ditemukan');
+        if (!customer.is_active) throw new HttpError(400, 'Pelanggan grosir tidak aktif');
+      }
 
       // Hitung ulang setiap baris dari data server (jangan percaya total klien).
       const lines = [];
@@ -259,33 +290,89 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
       }
 
       // Poin didapat dihitung dari nilai belanja setelah penukaran poin.
-      const earned = pointsEarned(payable, settings.point_earn_per_amount);
+      // Grosir kredit TIDAK memberi poin member (keputusan: pelanggan B2B tanpa poin).
+      const earned = isCredit ? 0 : pointsEarned(payable, settings.point_earn_per_amount);
 
       const paidTotal = payments.reduce((sum, p) => sum + Math.round(Number(p.amount)), 0);
-      if (paidTotal < grandTotal) {
-        throw new HttpError(400, `Pembayaran kurang ${grandTotal - paidTotal}`);
+      let change = 0;
+      let paidAmount = 0;
+      let paymentStatus = 'paid';
+
+      if (isCredit) {
+        // Uang muka (DP) opsional; sisanya menjadi piutang. Tidak ada kembalian.
+        if (paidTotal > grandTotal) {
+          throw new HttpError(400, 'Uang muka tidak boleh melebihi total tagihan');
+        }
+        paidAmount = paidTotal;
+        paymentStatus = paidAmount >= grandTotal ? 'paid' : (paidAmount > 0 ? 'partial' : 'unpaid');
+      } else {
+        if (paidTotal < grandTotal) {
+          throw new HttpError(400, `Pembayaran kurang ${grandTotal - paidTotal}`);
+        }
+        const cashTendered = payments
+          .filter((p) => p.method === 'cash')
+          .reduce((sum, p) => sum + Math.round(Number(p.amount)), 0);
+        change = paidTotal - grandTotal;
+        // Kembalian hanya boleh berasal dari uang tunai yang benar-benar diterima,
+        // sehingga split payment tidak bisa membuat toko menyerahkan kas lebih besar
+        // daripada yang diterima.
+        if (change > cashTendered) {
+          throw new HttpError(400, 'Kelebihan bayar melebihi jumlah pembayaran tunai');
+        }
       }
-      const cashTendered = payments
-        .filter((p) => p.method === 'cash')
-        .reduce((sum, p) => sum + Math.round(Number(p.amount)), 0);
-      const change = paidTotal - grandTotal;
-      // Kembalian hanya boleh berasal dari uang tunai yang benar-benar diterima,
-      // sehingga split payment tidak bisa membuat toko menyerahkan kas lebih besar
-      // daripada yang diterima.
-      if (change > cashTendered) {
-        throw new HttpError(400, 'Kelebihan bayar melebihi jumlah pembayaran tunai');
+
+      // Jatuh tempo kredit: override due_date bila valid, jika tidak dari termin
+      // pelanggan (atau override payment_term_days), dihitung dari hari ini.
+      let dueDate = null;
+      if (isCredit) {
+        if (dueDateInput) {
+          if (!isValidDate(dueDateInput)) throw new HttpError(400, 'Format due_date harus YYYY-MM-DD');
+          dueDate = dueDateInput;
+        } else {
+          const termDays = termDaysInput !== null && Number.isFinite(termDaysInput)
+            ? termDaysInput
+            : Number(customer.payment_term_days) || 0;
+          if (termDays < 0 || termDays > 3650) throw new HttpError(400, 'Termin (hari) tidak valid');
+          // Basis hari mengikuti zona waktu toko, konsisten dengan laporan.
+          const dueResult = await client.query(
+            `SELECT ((CURRENT_TIMESTAMP AT TIME ZONE $1)::date + $2::int)::date AS due_date`,
+            [APP_TIMEZONE, termDays]
+          );
+          dueDate = dueResult.rows[0].due_date;
+        }
+
+        // Cek limit kredit (0 = tanpa batas): piutang berjalan + tagihan ini.
+        const creditLimit = Number(customer.credit_limit) || 0;
+        if (creditLimit > 0) {
+          const outstandingResult = await client.query(
+            `SELECT COALESCE(SUM(grand_total - paid_amount), 0)::bigint AS outstanding
+             FROM sales
+             WHERE customer_id = $1 AND is_credit = TRUE AND status = 'completed' AND payment_status <> 'paid'`,
+            [customer.id]
+          );
+          const outstanding = Number(outstandingResult.rows[0].outstanding);
+          const remaining = grandTotal - paidAmount;
+          if (outstanding + remaining > creditLimit) {
+            throw new HttpError(
+              400,
+              `Melebihi limit kredit pelanggan (limit ${creditLimit}, piutang berjalan ${outstanding}, tagihan ${remaining})`
+            );
+          }
+        }
       }
 
       const invoiceNo = await nextDocNumber(client, settings.invoice_prefix || 'INV');
 
       const saleResult = await client.query(
         `INSERT INTO sales
-          (invoice_no, shift_id, cashier_id, member_id, subtotal, item_discount, txn_discount,
+          (invoice_no, shift_id, cashier_id, member_id, customer_id, is_credit, due_date,
+           paid_amount, payment_status, subtotal, item_discount, txn_discount,
            points_value, tax_total, grand_total, points_earned, points_redeemed, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'completed')
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'completed')
          RETURNING *`,
         [
-          invoiceNo, shiftId, req.user.id, memberId, subtotal, itemDiscountTotal, txnDiscountInput,
+          invoiceNo, shiftId, req.user.id, memberId, isCredit ? customer.id : null, isCredit, dueDate,
+          paidAmount, paymentStatus, subtotal, itemDiscountTotal, txnDiscountInput,
           pointsValue, taxTotal, grandTotal, earned, pointsRedeemed,
         ]
       );
@@ -410,12 +497,25 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
         }
       }
 
-      // Simpan pembayaran.
-      for (const payment of payments) {
-        await client.query(
-          'INSERT INTO sale_payments (sale_id, method, amount, reference) VALUES ($1, $2, $3, $4)',
-          [sale.id, payment.method, Math.round(Number(payment.amount)), cleanString(payment.reference, 120)]
-        );
+      // Simpan pembayaran. Untuk kredit, uang muka (DP) dicatat di invoice_payments
+      // agar kas shift TIDAK bertambah (expected_cash berbasis sale_payments).
+      if (isCredit) {
+        for (const payment of payments) {
+          const amount = Math.round(Number(payment.amount));
+          if (amount <= 0) continue;
+          await client.query(
+            `INSERT INTO invoice_payments (sale_id, amount, method, reference, user_id, note)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [sale.id, amount, payment.method, cleanString(payment.reference, 100), req.user.id, 'Uang muka']
+          );
+        }
+      } else {
+        for (const payment of payments) {
+          await client.query(
+            'INSERT INTO sale_payments (sale_id, method, amount, reference) VALUES ($1, $2, $3, $4)',
+            [sale.id, payment.method, Math.round(Number(payment.amount)), cleanString(payment.reference, 120)]
+          );
+        }
       }
 
       // Poin member.
@@ -449,7 +549,11 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
       action: 'checkout',
       entity: 'sales',
       entityId: result.sale.id,
-      detail: { invoice_no: result.invoiceNo, grand_total: Number(result.sale.grand_total) },
+      detail: {
+        invoice_no: result.invoiceNo,
+        grand_total: Number(result.sale.grand_total),
+        is_credit: Boolean(result.sale.is_credit),
+      },
     });
 
     res.status(201).json({
@@ -586,6 +690,11 @@ router.post('/:id/void', requirePermission('pos.use'), async (req, res, next) =>
       const sale = saleResult.rows[0];
       if (!sale) throw new HttpError(404, 'Transaksi tidak ditemukan');
       if (sale.status === 'void') throw new HttpError(400, 'Transaksi sudah di-void');
+      // Invoice kredit dikelola lewat modul Invoice Grosir (void dengan validasi
+      // piutang). Tolak di jalur void penjualan biasa agar tidak ada kas dianggap kembali.
+      if (sale.is_credit) {
+        throw new HttpError(400, 'Invoice kredit di-void melalui halaman Invoice Grosir');
+      }
 
       const todayCheck = await client.query(
         'SELECT (created_at::date = CURRENT_DATE) AS is_today FROM sales WHERE id = $1',
@@ -600,61 +709,8 @@ router.post('/:id/void', requirePermission('pos.use'), async (req, res, next) =>
         if (shift.rows[0]?.closed_at) throw new HttpError(400, 'Shift sudah ditutup, transaksi tidak dapat di-void');
       }
 
-      const settings = await getSettings();
-
-      const items = await client.query('SELECT * FROM sale_items WHERE sale_id = $1', [sale.id]);
-      for (const item of items.rows) {
-        // Hanya kembalikan qty yang belum pernah diretur, agar stok tidak
-        // bertambah dua kali (retur sudah menambah stok).
-        const unreturnedQty = item.qty - item.returned_qty;
-        if (unreturnedQty <= 0) continue;
-
-        // Kembalikan ke batch asal memakai jejak sale_item_batches (proporsional
-        // terhadap qty yang belum diretur). Fallback ke batch legacy untuk data lama.
-        await restoreSaleItemBatches(client, item, unreturnedQty);
-
-        // Baris paket: kembalikan stok tiap komponen sesuai qty paket.
-        if (item.bundle_id) {
-          const components = await client.query(
-            `SELECT bi.product_id, bi.qty, p.cost_price, p.name
-             FROM bundle_items bi
-             JOIN products p ON p.id = bi.product_id
-             WHERE bi.bundle_id = $1`,
-            [item.bundle_id]
-          );
-          for (const component of components.rows) {
-            await applyStockMovement(client, {
-              productId: component.product_id,
-              qtyChange: component.qty * unreturnedQty,
-              type: 'void',
-              refType: 'sale',
-              refId: sale.id,
-              unitCost: Number(component.cost_price),
-              note: `Void ${sale.invoice_no}`,
-              userId: req.user.id,
-              allowNegative: true,
-            });
-          }
-          continue;
-        }
-
-        const unreturnedBaseQty = Math.round(
-          (item.base_qty / item.qty) * unreturnedQty
-        );
-
-        await applyStockMovement(client, {
-          productId: item.product_id,
-          qtyChange: unreturnedBaseQty,
-          type: 'void',
-          refType: 'sale',
-          refId: sale.id,
-          // cost_price tersimpan per satuan jual; kartu stok memakai satuan dasar.
-          unitCost: Math.round(item.cost_price / (item.base_qty / item.qty)),
-          note: `Void ${sale.invoice_no}`,
-          userId: req.user.id,
-          allowNegative: true,
-        });
-      }
+      // Kembalikan stok seluruh item (produk & paket) memakai helper bersama.
+      await restoreSaleStock(client, sale, { userId: req.user.id });
 
       // Kembalikan poin: redeemed dikembalikan, earned ditarik kembali.
       if (sale.member_id) {
@@ -679,7 +735,7 @@ router.post('/:id/void', requirePermission('pos.use'), async (req, res, next) =>
         [reason, req.user.id, sale.id]
       );
 
-      return { sale: updated.rows[0], allowNegative: settings?.allow_negative_stock };
+      return { sale: updated.rows[0] };
     });
 
     await logAudit(pool, {

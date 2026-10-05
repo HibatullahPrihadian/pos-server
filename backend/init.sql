@@ -100,6 +100,23 @@ CREATE TABLE IF NOT EXISTS suppliers (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Pelanggan grosir/B2B (terpisah dari members). Dipakai untuk penjualan kredit:
+-- termin default (hari) & limit kredit (0 = tanpa batas).
+CREATE TABLE IF NOT EXISTS customers (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(30) UNIQUE NOT NULL,        -- CUST-0001
+    name VARCHAR(150) NOT NULL,              -- nama perusahaan/toko pelanggan
+    contact_name VARCHAR(150),
+    phone VARCHAR(50),
+    email VARCHAR(120),
+    address TEXT,
+    npwp VARCHAR(50),
+    payment_term_days INTEGER NOT NULL DEFAULT 0,  -- 0 = tunai; 30 = Net 30
+    credit_limit BIGINT NOT NULL DEFAULT 0,        -- 0 = tanpa batas
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
     sku VARCHAR(50) UNIQUE NOT NULL,
@@ -366,6 +383,45 @@ CREATE TABLE IF NOT EXISTS sale_payments (
     reference VARCHAR(120),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- =========================================================
+-- Penjualan kredit grosir (B2B) & piutang
+-- =========================================================
+-- Penjualan grosir kredit disimpan di `sales` (is_credit=TRUE) agar stok, HPP,
+-- laba, dan batch FEFO tetap konsisten lewat jalur sales yang sudah teruji.
+-- status tetap 'completed'; siklus hidup piutang dikelola lewat payment_status.
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id);
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS is_credit BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS due_date DATE;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS paid_amount BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_status VARCHAR(10) NOT NULL DEFAULT 'paid';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'sales_payment_status_check'
+    ) THEN
+        ALTER TABLE sales ADD CONSTRAINT sales_payment_status_check
+            CHECK (payment_status IN ('unpaid', 'partial', 'paid'));
+    END IF;
+END $$;
+
+-- Pembayaran cicilan invoice kredit. TERPISAH dari sale_payments (yang untuk kas
+-- shift) agar pembayaran piutang tidak menambah expected_cash shift kasir.
+CREATE TABLE IF NOT EXISTS invoice_payments (
+    id SERIAL PRIMARY KEY,
+    sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+    amount BIGINT NOT NULL CHECK (amount > 0),
+    method VARCHAR(10) NOT NULL CHECK (method IN ('cash', 'qris', 'debit', 'transfer')),
+    reference VARCHAR(100),
+    paid_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    user_id INTEGER REFERENCES users(id),
+    note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sales_customer ON sales (customer_id);
+CREATE INDEX IF NOT EXISTS idx_sales_due_date ON sales (is_credit, due_date);
+CREATE INDEX IF NOT EXISTS idx_invoice_payments_sale ON invoice_payments (sale_id);
 
 CREATE TABLE IF NOT EXISTS returns (
     id SERIAL PRIMARY KEY,

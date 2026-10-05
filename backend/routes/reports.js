@@ -4,6 +4,7 @@ const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { isValidDate } = require('../utils/validate');
 const { toInt } = require('../utils/pagination');
 const { sendCsv } = require('../utils/csv');
+const { getReceivableSummary } = require('../utils/receivables');
 
 const router = express.Router();
 
@@ -296,6 +297,14 @@ router.get('/profit-loss', async (req, res, next) => {
        WHERE status <> 'cancelled' AND date >= $1::date AND date <= $2::date`,
       rangeParams
     );
+    // Modal: hanya PO yang sudah dibayar penuh (pola sama dengan /purchase-paid).
+    const purchasePaidResult = await pool.query(
+      `SELECT COALESCE(SUM(total), 0)::bigint AS purchase_paid
+       FROM purchases
+       WHERE payment_status = 'paid' AND status <> 'cancelled'
+         AND date >= $1::date AND date <= $2::date`,
+      rangeParams
+    );
     const payoutResult = await pool.query(
       `SELECT COALESCE(SUM(amount), 0)::bigint AS consignment_payout
        FROM consignment_payouts
@@ -372,6 +381,7 @@ router.get('/profit-loss', async (req, res, next) => {
       })),
       info: {
         purchase_total: Number(purchaseResult.rows[0].purchase_total),
+        purchase_paid: Number(purchasePaidResult.rows[0].purchase_paid),
         consignment_payout: Number(payoutResult.rows[0].consignment_payout),
       },
       rows,
@@ -688,6 +698,9 @@ router.get('/dashboard', async (req, res, next) => {
       [APP_TIMEZONE]
     );
 
+    // Piutang grosir: total belum lunas, jumlah invoice, dan yang lewat jatuh tempo.
+    const receivable = await getReceivableSummary();
+
     res.json({
       today: {
         txn_count: today.rows[0].txn_count,
@@ -719,6 +732,12 @@ router.get('/dashboard', async (req, res, next) => {
       top_products: topProducts.rows,
       low_stock_count: lowStock.rows[0].n,
       open_shifts: openShifts.rows[0].n,
+      receivable: {
+        outstanding_total: receivable.outstanding_total,
+        unpaid_count: receivable.unpaid_count,
+        overdue_total: receivable.overdue_total,
+        overdue_count: receivable.overdue_count,
+      },
       trend: salesTrend.rows.map((r) => ({
         date: toIso(r.date),
         grand_total: Number(r.grand_total),

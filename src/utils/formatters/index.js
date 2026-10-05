@@ -1,4 +1,4 @@
-export { formatCurrency, formatNumber, parseMoney, parseQty } from './currency';
+export { formatCurrency, formatNumber, parseMoney, parseQty, angkaTerbilang } from './currency';
 export {
   MONTHS_ID,
   parseDateParts,
