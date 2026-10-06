@@ -148,12 +148,17 @@ router.get('/', requirePermission('promotion.manage'), async (req, res, next) =>
   try {
     const { page, limit, offset } = getPagination(req.query);
     const activeOnly = toBool(req.query.is_active, false);
+    const params = [req.business];
+    const conditions = ['pr.business = $1'];
+    if (activeOnly) conditions.push('pr.is_active = TRUE');
+    const where = `WHERE ${conditions.join(' AND ')}`;
 
-    const where = activeOnly ? 'WHERE pr.is_active = TRUE' : '';
-    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM promotions pr ${where}`);
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM promotions pr ${where}`, params);
+    params.push(limit, offset);
     const result = await pool.query(
-      `${SELECT_PROMO} ${where} ORDER BY pr.is_active DESC, pr.id DESC LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      `${SELECT_PROMO} ${where} ORDER BY pr.is_active DESC, pr.id DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
     );
     res.json(paginated(result.rows, countResult.rows[0].total, page, limit));
   } catch (err) {
@@ -163,7 +168,7 @@ router.get('/', requirePermission('promotion.manage'), async (req, res, next) =>
 
 router.get('/:id', requirePermission('promotion.manage'), async (req, res, next) => {
   try {
-    const result = await pool.query(`${SELECT_PROMO} WHERE pr.id = $1`, [req.params.id]);
+    const result = await pool.query(`${SELECT_PROMO} WHERE pr.id = $1 AND pr.business = $2`, [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Promo tidak ditemukan');
     res.json(result.rows[0]);
   } catch (err) {
@@ -182,14 +187,14 @@ router.post('/', requirePermission('promotion.manage'), async (req, res, next) =
     const result = await pool.query(
       `INSERT INTO promotions
         (name, scope, product_id, category_id, unit_id, discount_type, discount_value,
-         min_qty, start_time, end_time, days_of_week, start_date, end_date, is_active)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+         min_qty, start_time, end_time, days_of_week, start_date, end_date, is_active, business)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING *`,
       [
         value.name, value.scope, value.product_id, value.category_id, value.unit_id,
         value.discount_type, value.discount_value, value.min_qty,
         value.start_time ?? null, value.end_time ?? null, value.days_of_week ?? null,
-        value.start_date ?? null, value.end_date ?? null, value.is_active,
+        value.start_date ?? null, value.end_date ?? null, value.is_active, req.business,
       ]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'promotions', entityId: result.rows[0].id });
@@ -201,7 +206,7 @@ router.post('/', requirePermission('promotion.manage'), async (req, res, next) =
 
 router.put('/:id', requirePermission('promotion.manage'), async (req, res, next) => {
   try {
-    const current = await pool.query('SELECT * FROM promotions WHERE id = $1', [req.params.id]);
+    const current = await pool.query('SELECT * FROM promotions WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!current.rows[0]) throw new HttpError(404, 'Promo tidak ditemukan');
 
     const { value, error } = validateBody(req.body || {}, { partial: true });
@@ -230,10 +235,10 @@ router.put('/:id', requirePermission('promotion.manage'), async (req, res, next)
 
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
     const params = keys.map((key) => value[key]);
-    params.push(req.params.id);
+    params.push(req.params.id, req.business);
 
     const result = await pool.query(
-      `UPDATE promotions SET ${setClause} WHERE id = $${params.length} RETURNING *`,
+      `UPDATE promotions SET ${setClause} WHERE id = $${params.length - 1} AND business = $${params.length} RETURNING *`,
       params
     );
     await logAudit(pool, { userId: req.user.id, action: 'update', entity: 'promotions', entityId: Number(req.params.id) });
@@ -245,19 +250,25 @@ router.put('/:id', requirePermission('promotion.manage'), async (req, res, next)
 
 router.delete('/:id', requirePermission('promotion.manage'), async (req, res, next) => {
   try {
+    const owned = await pool.query(
+      'SELECT id FROM promotions WHERE id = $1 AND business = $2',
+      [req.params.id, req.business]
+    );
+    if (!owned.rows[0]) throw new HttpError(404, 'Promo tidak ditemukan');
+
     const used = await pool.query('SELECT COUNT(*)::int AS n FROM sale_items WHERE promo_id = $1', [req.params.id]);
     if (used.rows[0].n > 0) {
       // Promo sudah dipakai transaksi; nonaktifkan saja agar riwayat tetap utuh.
       const result = await pool.query(
-        'UPDATE promotions SET is_active = FALSE WHERE id = $1 RETURNING id',
-        [req.params.id]
+        'UPDATE promotions SET is_active = FALSE WHERE id = $1 AND business = $2 RETURNING id',
+        [req.params.id, req.business]
       );
       if (!result.rows[0]) throw new HttpError(404, 'Promo tidak ditemukan');
       await logAudit(pool, { userId: req.user.id, action: 'deactivate', entity: 'promotions', entityId: Number(req.params.id) });
       return res.json({ message: 'Promo dinonaktifkan (sudah dipakai transaksi)' });
     }
 
-    const result = await pool.query('DELETE FROM promotions WHERE id = $1 RETURNING id', [req.params.id]);
+    const result = await pool.query('DELETE FROM promotions WHERE id = $1 AND business = $2 RETURNING id', [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Promo tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'delete', entity: 'promotions', entityId: Number(req.params.id) });
     res.json({ message: 'Promo dihapus' });

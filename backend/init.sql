@@ -10,24 +10,24 @@ CREATE TABLE IF NOT EXISTS users (
     username VARCHAR(50) UNIQUE NOT NULL,
     full_name VARCHAR(100) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(10) NOT NULL DEFAULT 'kasir' CHECK (role IN ('admin', 'kasir', 'gudang')),
+    role VARCHAR(10) NOT NULL DEFAULT 'kasir' CHECK (role IN ('admin', 'kasir', 'gudang', 'operator')),
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     permissions JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Role baru 'gudang' + izin granular per user (JSON). Tabel users pada DB yang
--- sudah berjalan dibuat sebelum kolom/role ini ada, sehingga CREATE TABLE IF
+-- Role 'gudang' & 'operator' + izin granular per user (JSON). Tabel users pada DB
+-- yang sudah berjalan dibuat sebelum kolom/role ini ada, sehingga CREATE TABLE IF
 -- NOT EXISTS di atas tidak mengubahnya — perlu ALTER idempotent.
 -- Guard via pg_constraint agar hanya diubah bila definisinya belum memuat
--- 'gudang' (DROP/ADD constraint memakai ACCESS EXCLUSIVE lock + validasi ulang
+-- 'operator' (DROP/ADD constraint memakai ACCESS EXCLUSIVE lock + validasi ulang
 -- seluruh baris, jadi jangan dijalankan setiap kali init.sql diulang).
 DO $$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'users_role_check'
-          AND pg_get_constraintdef(oid) NOT LIKE '%gudang%'
+          AND pg_get_constraintdef(oid) NOT LIKE '%operator%'
     ) THEN
         ALTER TABLE users DROP CONSTRAINT users_role_check;
     END IF;
@@ -35,11 +35,13 @@ BEGIN
         SELECT 1 FROM pg_constraint WHERE conname = 'users_role_check'
     ) THEN
         ALTER TABLE users ADD CONSTRAINT users_role_check
-            CHECK (role IN ('admin', 'kasir', 'gudang'));
+            CHECK (role IN ('admin', 'kasir', 'gudang', 'operator'));
     END IF;
 END $$;
 -- NULL = pakai preset role; array eksplisit = izin custom per user.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB;
+-- Multi-usaha: NULL = lintas usaha (owner/admin); staf diisi satu usaha.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS business VARCHAR(20);
 
 CREATE TABLE IF NOT EXISTS store_settings (
     id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -61,6 +63,25 @@ CREATE TABLE IF NOT EXISTS store_settings (
 );
 
 INSERT INTO store_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- Pengaturan per usaha. store_settings tetap dipakai sebagai default minimarket
+-- (kompatibel penuh dengan kode lama); usaha lain punya baris sendiri di sini.
+CREATE TABLE IF NOT EXISTS business_settings (
+    business VARCHAR(20) PRIMARY KEY,
+    store_name VARCHAR(150) NOT NULL DEFAULT 'Usaha Saya',
+    address TEXT NOT NULL DEFAULT '',
+    phone VARCHAR(50) NOT NULL DEFAULT '',
+    npwp VARCHAR(50) NOT NULL DEFAULT '',
+    tax_rate NUMERIC(5, 2) NOT NULL DEFAULT 0.00,
+    tax_included BOOLEAN NOT NULL DEFAULT TRUE,
+    invoice_prefix VARCHAR(20) NOT NULL DEFAULT 'INV',
+    receipt_footer TEXT NOT NULL DEFAULT 'Terima kasih',
+    qris_image_path TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO business_settings (business, store_name) VALUES ('fotokopi', 'Fotokopi Saya')
+ON CONFLICT (business) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id SERIAL PRIMARY KEY,
@@ -85,10 +106,22 @@ CREATE TABLE IF NOT EXISTS invoice_counters (
 -- =========================================================
 CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(100) UNIQUE NOT NULL,
+    name VARCHAR(100) NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Kategori kini unik per usaha, bukan global: nama yang sama boleh ada di
+-- minimarket dan fotokopi. UNIQUE global lama dibuang di sini; indeks unik
+-- (business, name) dibuat setelah kolom `business` terpasang (lihat blok
+-- multi-usaha di bawah). Tanpa ini, impor produk usaha lain akan menempel ke
+-- kategori usaha yang sudah ada.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'categories_name_key') THEN
+        ALTER TABLE categories DROP CONSTRAINT categories_name_key;
+    END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS suppliers (
     id SERIAL PRIMARY KEY,
@@ -508,12 +541,15 @@ END $$;
 CREATE TABLE IF NOT EXISTS consignors (
     id SERIAL PRIMARY KEY,
     name VARCHAR(150) NOT NULL,
+    business VARCHAR(20) NOT NULL DEFAULT 'minimarket',
     phone VARCHAR(50),
     address TEXT,
     note TEXT,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE consignors ADD COLUMN IF NOT EXISTS business VARCHAR(20) NOT NULL DEFAULT 'minimarket';
 
 ALTER TABLE products ADD COLUMN IF NOT EXISTS is_consignment BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS consignor_id INTEGER REFERENCES consignors(id);
@@ -523,6 +559,7 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS consignor_id INTEGER REFERENCES co
 CREATE TABLE IF NOT EXISTS consignment_payouts (
     id SERIAL PRIMARY KEY,
     consignor_id INTEGER NOT NULL REFERENCES consignors(id),
+    business VARCHAR(20) NOT NULL DEFAULT 'minimarket',
     amount BIGINT NOT NULL CHECK (amount > 0),
     period_from DATE,
     period_to DATE,
@@ -530,6 +567,8 @@ CREATE TABLE IF NOT EXISTS consignment_payouts (
     user_id INTEGER REFERENCES users(id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE consignment_payouts ADD COLUMN IF NOT EXISTS business VARCHAR(20) NOT NULL DEFAULT 'minimarket';
 
 -- =========================================================
 -- P2: Absensi karyawan
@@ -620,6 +659,13 @@ CREATE TABLE IF NOT EXISTS expense_categories (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Kategori beban per usaha. Data lama = minimarket. Keunikan name dibuat per
+-- usaha lewat indeks unik (name global UNIQUE lama tetap ada di DB berjalan,
+-- jadi kategori baru harus bernama unik lintas usaha kecuali migrasi lanjutan).
+ALTER TABLE expense_categories ADD COLUMN IF NOT EXISTS business VARCHAR(20) NOT NULL DEFAULT 'minimarket';
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_expense_categories_business_name
+    ON expense_categories (business, name);
+
 -- Nomor dokumen EXP-YYYYMMDD-NNNN via nextDocNumber(client, 'EXP').
 -- `amount` adalah nilai beban yang diakui (basis akrual); `paid_amount` hanya
 -- untuk pelacakan kas. Laba rugi memakai `amount`, bukan `paid_amount`.
@@ -638,7 +684,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Seed kategori beban awal (idempotent).
+-- Seed kategori beban awal untuk minimarket (idempotent) + satu set untuk fotokopi.
 INSERT INTO expense_categories (name) VALUES
     ('Gaji'),
     ('Sewa'),
@@ -648,6 +694,182 @@ INSERT INTO expense_categories (name) VALUES
     ('Transport'),
     ('Lain-lain')
 ON CONFLICT (name) DO NOTHING;
+
+INSERT INTO expense_categories (name, business) VALUES
+    ('Fotokopi - Gaji', 'fotokopi'),
+    ('Fotokopi - Sewa', 'fotokopi'),
+    ('Fotokopi - Listrik & Air', 'fotokopi'),
+    ('Fotokopi - Tinta & Kertas', 'fotokopi'),
+    ('Fotokopi - Transport', 'fotokopi'),
+    ('Fotokopi - Lain-lain', 'fotokopi')
+ON CONFLICT (name) DO NOTHING;
+
+-- =========================================================
+-- P6: Multi-usaha & modul fotokopi (jasa cetak)
+-- =========================================================
+-- Master jasa fotokopi. Harga per halaman ATAU per lembar; paket (bundle)
+-- berlaku bila qty mencapai bundle_qty.
+CREATE TABLE IF NOT EXISTS print_services (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    business VARCHAR(20) NOT NULL DEFAULT 'fotokopi',
+    category VARCHAR(50),
+    paper_size VARCHAR(20),
+    color_mode VARCHAR(10),
+    price_per_page BIGINT NOT NULL DEFAULT 0,
+    price_per_sheet BIGINT NOT NULL DEFAULT 0,
+    min_qty INTEGER NOT NULL DEFAULT 1,
+    bundle_price BIGINT,
+    bundle_qty INTEGER,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Master jasa dibagi per usaha (semua jasa lama = fotokopi).
+ALTER TABLE print_services ADD COLUMN IF NOT EXISTS business VARCHAR(20) NOT NULL DEFAULT 'fotokopi';
+
+-- Pesanan fotokopi + antrian harian. Total disimpan agar nota & laporan stabil.
+CREATE TABLE IF NOT EXISTS print_orders (
+    id SERIAL PRIMARY KEY,
+    code VARCHAR(40) UNIQUE NOT NULL,
+    business VARCHAR(20) NOT NULL DEFAULT 'fotokopi',
+    queue_no INTEGER,
+    customer_id INTEGER REFERENCES customers(id),
+    customer_name VARCHAR(150),
+    status VARCHAR(15) NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued', 'processing', 'ready', 'picked_up', 'cancelled')),
+    notes TEXT,
+    subtotal BIGINT NOT NULL DEFAULT 0,
+    discount BIGINT NOT NULL DEFAULT 0,
+    tax_total BIGINT NOT NULL DEFAULT 0,
+    grand_total BIGINT NOT NULL DEFAULT 0,
+    paid_amount BIGINT NOT NULL DEFAULT 0,
+    payment_status VARCHAR(10) NOT NULL DEFAULT 'unpaid'
+        CHECK (payment_status IN ('unpaid', 'partial', 'paid')),
+    sale_id INTEGER REFERENCES sales(id),
+    shift_id INTEGER REFERENCES shifts(id),
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS print_order_items (
+    id SERIAL PRIMARY KEY,
+    order_id INTEGER NOT NULL REFERENCES print_orders(id) ON DELETE CASCADE,
+    service_id INTEGER REFERENCES print_services(id),
+    description VARCHAR(200),
+    pages INTEGER NOT NULL DEFAULT 1,
+    copies INTEGER NOT NULL DEFAULT 1,
+    sides VARCHAR(10) NOT NULL DEFAULT 'single' CHECK (sides IN ('single', 'double')),
+    paper_size VARCHAR(20),
+    color_mode VARCHAR(10),
+    unit_price BIGINT NOT NULL DEFAULT 0,
+    qty INTEGER NOT NULL DEFAULT 1,
+    line_total BIGINT NOT NULL DEFAULT 0
+);
+
+-- Baris pesanan bisa berupa jasa (service_id) ATAU produk retail/ATK (product_id).
+-- Kolom produk ditambah lewat ALTER agar DB lama (yang sudah punya print_order_items)
+-- ikut ter-update; CREATE TABLE IF NOT EXISTS tidak menambah kolom ke tabel eksisting.
+-- qty = jumlah dalam satuan jual; base_qty = konversi ke satuan dasar untuk stok.
+ALTER TABLE print_order_items ADD COLUMN IF NOT EXISTS product_id INTEGER REFERENCES products(id);
+ALTER TABLE print_order_items ADD COLUMN IF NOT EXISTS unit_id INTEGER REFERENCES product_units(id);
+ALTER TABLE print_order_items ADD COLUMN IF NOT EXISTS unit_name VARCHAR(20);
+ALTER TABLE print_order_items ADD COLUMN IF NOT EXISTS base_qty INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE print_order_items ADD COLUMN IF NOT EXISTS cost_price BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE print_order_items ADD COLUMN IF NOT EXISTS base_cost_price BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE print_order_items ADD COLUMN IF NOT EXISTS discount BIGINT NOT NULL DEFAULT 0;
+
+-- Setiap baris harus punya sumber harga: jasa (service_id) atau produk (product_id).
+-- Dibungkus DO $$ ... $$ agar idempotent (ADD CONSTRAINT gagal bila dijalankan ulang).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'print_order_items_kind_check'
+    ) THEN
+        ALTER TABLE print_order_items
+            ADD CONSTRAINT print_order_items_kind_check
+            CHECK (service_id IS NOT NULL OR product_id IS NOT NULL);
+    END IF;
+END $$;
+
+-- Baris penjualan jasa: product_id NULL, service_id terisi (pola sama seperti
+-- paket/bundle_id). CHECK lama diganti agar mencakup service_id.
+ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS service_id INTEGER REFERENCES print_services(id);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'sale_items_product_or_bundle'
+          AND pg_get_constraintdef(oid) NOT LIKE '%service_id%'
+    ) THEN
+        ALTER TABLE sale_items DROP CONSTRAINT sale_items_product_or_bundle;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'sale_items_product_or_bundle'
+    ) THEN
+        ALTER TABLE sale_items
+            ADD CONSTRAINT sale_items_product_or_bundle
+            CHECK (product_id IS NOT NULL OR bundle_id IS NOT NULL OR service_id IS NOT NULL);
+    END IF;
+END $$;
+
+-- Baris retur jasa: return_items mengikuti pola sale_items. product_id boleh NULL
+-- + kolom service_id, agar retur/void penjualan jasa (fotokopi) tidak 500.
+ALTER TABLE return_items ALTER COLUMN product_id DROP NOT NULL;
+ALTER TABLE return_items ADD COLUMN IF NOT EXISTS service_id INTEGER REFERENCES print_services(id);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'return_items_product_or_bundle'
+          AND pg_get_constraintdef(oid) NOT LIKE '%service_id%'
+    ) THEN
+        ALTER TABLE return_items DROP CONSTRAINT return_items_product_or_bundle;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'return_items_product_or_bundle'
+    ) THEN
+        ALTER TABLE return_items
+            ADD CONSTRAINT return_items_product_or_bundle
+            CHECK (product_id IS NOT NULL OR bundle_id IS NOT NULL OR service_id IS NOT NULL);
+    END IF;
+END $$;
+
+-- =========================================================
+-- Multi-usaha: kolom business pada tabel bersama
+-- =========================================================
+-- Satu aplikasi, dua usaha (minimarket & fotokopi). Data lama wajib dianggap
+-- minimarket, sehingga DEFAULT 'minimarket' + filter dengan default yang sama
+-- membuat perilaku lama identik. Tabel dipilih lewat nama agar migrasi tetap
+-- idempoten dan singkat.
+-- PENTING: blok ini diletakkan SETELAH semua tabel bersama dibuat. Bila
+-- dipindah ke atas, ALTER TABLE pada tabel yang belum ada membuat migrasi gagal
+-- di DB/volume baru dan kolom `business` tidak pernah terpasang. Penjaga
+-- to_regclass dipertahankan agar tetap aman bila urutan berubah.
+DO $$
+DECLARE t TEXT;
+BEGIN
+    FOREACH t IN ARRAY ARRAY[
+        'products', 'categories', 'suppliers', 'customers', 'members',
+        'promotions', 'bundles', 'expenses', 'expense_categories',
+        'stock_movements', 'stock_opnames', 'purchases', 'shifts', 'sales'
+    ] LOOP
+        IF to_regclass('public.' || t) IS NOT NULL THEN
+            EXECUTE format(
+                'ALTER TABLE %I ADD COLUMN IF NOT EXISTS business VARCHAR(20) NOT NULL DEFAULT ''minimarket''',
+                t
+            );
+        END IF;
+    END LOOP;
+END $$;
+
+-- Kategori unik per usaha (setelah kolom `business` terpasang). Lihat catatan di
+-- dekat definisi tabel categories.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_categories_business_name
+    ON categories (business, name);
 
 -- =========================================================
 -- Indeks
@@ -697,3 +919,27 @@ CREATE INDEX IF NOT EXISTS idx_returns_created_at ON returns (created_at);
 CREATE INDEX IF NOT EXISTS idx_return_items_return ON return_items (return_id);
 CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases (date);
 CREATE INDEX IF NOT EXISTS idx_consignment_payouts_created ON consignment_payouts (created_at);
+-- Multi-usaha: filter business & antrian fotokopi
+CREATE INDEX IF NOT EXISTS idx_sales_business_created ON sales (business, created_at);
+CREATE INDEX IF NOT EXISTS idx_shifts_business ON shifts (business);
+CREATE INDEX IF NOT EXISTS idx_print_orders_status ON print_orders (status, created_at);
+CREATE INDEX IF NOT EXISTS idx_print_orders_queue ON print_orders (queue_no);
+CREATE INDEX IF NOT EXISTS idx_print_order_items_order ON print_order_items (order_id);
+-- Fase 3 (performa): indeks filter per usaha pada tabel yang dipakai bersama.
+CREATE INDEX IF NOT EXISTS idx_products_business_active_name ON products (business, is_active, name);
+CREATE INDEX IF NOT EXISTS idx_products_business_category ON products (business, category_id);
+CREATE INDEX IF NOT EXISTS idx_categories_business ON categories (business);
+CREATE INDEX IF NOT EXISTS idx_suppliers_business ON suppliers (business);
+CREATE INDEX IF NOT EXISTS idx_customers_business ON customers (business);
+CREATE INDEX IF NOT EXISTS idx_members_business ON members (business);
+CREATE INDEX IF NOT EXISTS idx_promotions_business_active ON promotions (business, is_active);
+CREATE INDEX IF NOT EXISTS idx_bundles_business_active ON bundles (business, is_active);
+CREATE INDEX IF NOT EXISTS idx_expenses_business_date ON expenses (business, date);
+CREATE INDEX IF NOT EXISTS idx_expenses_category_business ON expenses (business, expense_category_id, date);
+CREATE INDEX IF NOT EXISTS idx_purchases_business_date ON purchases (business, date);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_business_created ON stock_movements (business, created_at);
+CREATE INDEX IF NOT EXISTS idx_stock_opnames_business ON stock_opnames (business);
+-- Antrian fotokopi aktif (skip business tak dipakai karena tabel khusus fotokopi).
+CREATE INDEX IF NOT EXISTS idx_print_orders_queue_active
+    ON print_orders (business, status, queue_no DESC NULLS LAST, id DESC);
+CREATE INDEX IF NOT EXISTS idx_sale_items_sale_product ON sale_items (sale_id, product_id);

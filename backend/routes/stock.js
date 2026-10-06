@@ -24,8 +24,9 @@ router.get('/movements', async (req, res, next) => {
     const to = cleanString(req.query.to, 10);
     const type = cleanString(req.query.type, 20);
 
-    const conditions = [];
-    const params = [];
+    // Mutasi stok dipisah per usaha; tanpa header, default 'minimarket' = perilaku lama.
+    const conditions = ['sm.business = $1'];
+    const params = [req.business];
 
     if (productId > 0) {
       params.push(productId);
@@ -75,8 +76,9 @@ router.get('/low', async (req, res, next) => {
               c.name AS category_name
        FROM products p
        LEFT JOIN categories c ON c.id = p.category_id
-       WHERE p.is_active = TRUE AND p.stock_qty <= p.min_stock
-       ORDER BY (p.stock_qty - p.min_stock), p.name`
+       WHERE p.business = $1 AND p.is_active = TRUE AND p.stock_qty <= p.min_stock
+       ORDER BY (p.stock_qty - p.min_stock), p.name`,
+      [req.business]
     );
     res.json(result.rows);
   } catch (err) {
@@ -96,8 +98,8 @@ router.get('/batches', async (req, res, next) => {
     const includeExpired = req.query.include_expired === 'true' || req.query.include_expired === '1';
     const onlyAvailable = req.query.only_available !== 'false';
 
-    const conditions = [];
-    const params = [];
+    const conditions = ['p.business = $1'];
+    const params = [req.business];
     if (productId > 0) {
       params.push(productId);
       conditions.push(`sb.product_id = $${params.length}`);
@@ -112,7 +114,10 @@ router.get('/batches', async (req, res, next) => {
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM stock_batches sb ${where}`, params);
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM stock_batches sb JOIN products p ON p.id = sb.product_id ${where}`,
+      params
+    );
     params.push(limit, offset);
     const result = await pool.query(
       `SELECT sb.*, p.sku, p.name AS product_name, p.base_unit,
@@ -148,13 +153,14 @@ router.get('/expiring', async (req, res, next) => {
        FROM stock_batches sb
        JOIN products p ON p.id = sb.product_id
        LEFT JOIN categories c ON c.id = p.category_id
-       WHERE sb.qty_remaining > 0
+       WHERE p.business = $2
+         AND sb.qty_remaining > 0
          AND sb.expiry_date IS NOT NULL
          AND sb.expiry_date >= CURRENT_DATE - INTERVAL '365 days'
          AND sb.expiry_date <= CURRENT_DATE + $1::int
        ORDER BY sb.expiry_date, p.name
        LIMIT 200`,
-      [warningDays]
+      [warningDays, req.business]
     );
 
     const expired = result.rows.filter((r) => r.is_expired);
@@ -185,9 +191,14 @@ router.put('/batches/:id', requirePermission('stock.manage'), async (req, res, n
     }
     if (updates.length === 0) throw new HttpError(400, 'Tidak ada perubahan');
 
-    params.push(batchId);
+    params.push(batchId, req.business);
     const result = await pool.query(
-      `UPDATE stock_batches SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`,
+      `UPDATE stock_batches sb SET ${updates.join(', ')}
+       WHERE sb.id = $${params.length - 1}
+         AND EXISTS (
+           SELECT 1 FROM products p WHERE p.id = sb.product_id AND p.business = $${params.length}
+         )
+       RETURNING sb.*`,
       params
     );
     if (!result.rows[0]) throw new HttpError(404, 'Batch tidak ditemukan');
@@ -233,6 +244,7 @@ router.post('/adjustments', requirePermission('stock.manage'), async (req, res, 
         refType: 'manual',
         note,
         userId: req.user.id,
+        business: req.business,
         allowNegative: settings?.allow_negative_stock === true,
       });
 
@@ -288,11 +300,11 @@ router.get('/opnames', async (req, res, next) => {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
     const status = cleanString(req.query.status, 10);
 
-    const params = [];
-    let where = '';
+    const params = [req.business];
+    let where = 'WHERE so.business = $1';
     if (status === 'draft' || status === 'posted') {
       params.push(status);
-      where = `WHERE so.status = $${params.length}`;
+      where += ` AND so.status = $${params.length}`;
     }
 
     const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM stock_opnames so ${where}`, params);
@@ -318,8 +330,8 @@ router.get('/opnames/:id', async (req, res, next) => {
   try {
     const opname = await pool.query(
       `SELECT so.*, u.full_name AS user_name FROM stock_opnames so
-       LEFT JOIN users u ON u.id = so.user_id WHERE so.id = $1`,
-      [req.params.id]
+       LEFT JOIN users u ON u.id = so.user_id WHERE so.id = $1 AND so.business = $2`,
+      [req.params.id, req.business]
     );
     if (!opname.rows[0]) throw new HttpError(404, 'Opname tidak ditemukan');
 
@@ -350,9 +362,9 @@ router.post('/opnames', requirePermission('stock.manage'), async (req, res, next
     const created = await withTransaction(async (client) => {
       const code = await nextDocNumber(client, 'OPN');
       const opnameResult = await client.query(
-        `INSERT INTO stock_opnames (code, date, user_id, note)
-         VALUES ($1, COALESCE($2::date, CURRENT_DATE), $3, $4) RETURNING *`,
-        [code, date || null, req.user.id, note]
+        `INSERT INTO stock_opnames (code, date, user_id, note, business)
+         VALUES ($1, COALESCE($2::date, CURRENT_DATE), $3, $4, $5) RETURNING *`,
+        [code, date || null, req.user.id, note, req.business]
       );
       const opname = opnameResult.rows[0];
 
@@ -361,7 +373,7 @@ router.post('/opnames', requirePermission('stock.manage'), async (req, res, next
           const productId = toInt(item.product_id, 0);
           if (productId <= 0) continue;
           const counted = Math.max(0, Math.round(Number(item.counted_qty) || 0));
-          const product = await client.query('SELECT stock_qty FROM products WHERE id = $1', [productId]);
+          const product = await client.query('SELECT stock_qty FROM products WHERE id = $1 AND business = $2', [productId, req.business]);
           if (!product.rows[0]) continue;
           const systemQty = product.rows[0].stock_qty;
           await client.query(
@@ -375,8 +387,9 @@ router.post('/opnames', requirePermission('stock.manage'), async (req, res, next
       } else {
         await client.query(
           `INSERT INTO stock_opname_items (opname_id, product_id, system_qty, counted_qty, diff)
-           SELECT $1, p.id, p.stock_qty, p.stock_qty, 0 FROM products p WHERE p.is_active = TRUE`,
-          [opname.id]
+           SELECT $1, p.id, p.stock_qty, p.stock_qty, 0 FROM products p
+           WHERE p.business = $2 AND p.is_active = TRUE`,
+          [opname.id, req.business]
         );
       }
 
@@ -396,7 +409,7 @@ router.put('/opnames/:id/items', requirePermission('stock.manage'), async (req, 
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (items.length === 0) throw new HttpError(400, 'items wajib diisi');
 
-    const opname = await pool.query('SELECT id, status FROM stock_opnames WHERE id = $1', [req.params.id]);
+    const opname = await pool.query('SELECT id, status FROM stock_opnames WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!opname.rows[0]) throw new HttpError(404, 'Opname tidak ditemukan');
     if (opname.rows[0].status === 'posted') throw new HttpError(400, 'Opname sudah diposting');
 
@@ -427,8 +440,8 @@ router.post('/opnames/:id/post', requirePermission('stock.manage'), async (req, 
 
     const result = await withTransaction(async (client) => {
       const opnameResult = await client.query(
-        'SELECT * FROM stock_opnames WHERE id = $1 FOR UPDATE',
-        [req.params.id]
+        'SELECT * FROM stock_opnames WHERE id = $1 AND business = $2 FOR UPDATE',
+        [req.params.id, req.business]
       );
       const opname = opnameResult.rows[0];
       if (!opname) throw new HttpError(404, 'Opname tidak ditemukan');
@@ -458,6 +471,7 @@ router.post('/opnames/:id/post', requirePermission('stock.manage'), async (req, 
           refId: opname.id,
           note: `Opname ${opname.code}`,
           userId: req.user.id,
+          business: req.business,
           allowNegative: true,
         });
 

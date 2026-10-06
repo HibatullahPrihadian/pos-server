@@ -58,11 +58,14 @@ router.get('/consignors', async (req, res, next) => {
     const { page, limit, offset } = getPagination(req.query);
     const activeOnly = req.query.is_active === 'true';
 
-    const where = activeOnly ? 'WHERE c.is_active = TRUE' : '';
-    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM consignors c ${where}`);
+    const conditions = ['c.business = $1'];
+    if (activeOnly) conditions.push('c.is_active = TRUE');
+    const where = `WHERE ${conditions.join(' AND ')}`;
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM consignors c ${where}`, [req.business]);
+    const params = [req.business, limit, offset];
     const result = await pool.query(
-      `${PAYABLE_SQL} ${where} ORDER BY c.name LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      `${PAYABLE_SQL} ${where} ORDER BY c.name LIMIT $2 OFFSET $3`,
+      params
     );
     res.json(paginated(result.rows, countResult.rows[0].total, page, limit));
   } catch (err) {
@@ -72,7 +75,7 @@ router.get('/consignors', async (req, res, next) => {
 
 router.get('/consignors/:id', async (req, res, next) => {
   try {
-    const result = await pool.query(`${PAYABLE_SQL} WHERE c.id = $1`, [req.params.id]);
+    const result = await pool.query(`${PAYABLE_SQL} WHERE c.id = $1 AND c.business = $2`, [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Penitip tidak ditemukan');
     res.json(result.rows[0]);
   } catch (err) {
@@ -86,13 +89,14 @@ router.post('/consignors', async (req, res, next) => {
     if (name.error) throw new HttpError(400, name.error);
 
     const result = await pool.query(
-      `INSERT INTO consignors (name, phone, address, note)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
+      `INSERT INTO consignors (name, phone, address, note, business)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
       [
         name.value,
         cleanString(req.body?.phone, 50),
         cleanString(req.body?.address, 500),
         cleanString(req.body?.note, 500),
+        req.business,
       ]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'consignors', entityId: result.rows[0].id });
@@ -104,7 +108,7 @@ router.post('/consignors', async (req, res, next) => {
 
 router.put('/consignors/:id', async (req, res, next) => {
   try {
-    const existing = await pool.query('SELECT * FROM consignors WHERE id = $1', [req.params.id]);
+    const existing = await pool.query('SELECT * FROM consignors WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!existing.rows[0]) throw new HttpError(404, 'Penitip tidak ditemukan');
 
     const value = {};
@@ -123,9 +127,9 @@ router.put('/consignors/:id', async (req, res, next) => {
 
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
     const params = keys.map((key) => value[key]);
-    params.push(req.params.id);
+    params.push(req.params.id, req.business);
     const result = await pool.query(
-      `UPDATE consignors SET ${setClause} WHERE id = $${params.length} RETURNING *`,
+      `UPDATE consignors SET ${setClause} WHERE id = $${params.length - 1} AND business = $${params.length} RETURNING *`,
       params
     );
     await logAudit(pool, { userId: req.user.id, action: 'update', entity: 'consignors', entityId: Number(req.params.id) });
@@ -137,17 +141,26 @@ router.put('/consignors/:id', async (req, res, next) => {
 
 router.delete('/consignors/:id', async (req, res, next) => {
   try {
+    const owned = await pool.query(
+      'SELECT id FROM consignors WHERE id = $1 AND business = $2',
+      [req.params.id, req.business]
+    );
+    if (!owned.rows[0]) throw new HttpError(404, 'Penitip tidak ditemukan');
+
     const used = await pool.query('SELECT COUNT(*)::int AS n FROM products WHERE consignor_id = $1', [req.params.id]);
     if (used.rows[0].n > 0) {
       const result = await pool.query(
-        'UPDATE consignors SET is_active = FALSE WHERE id = $1 RETURNING id',
-        [req.params.id]
+        'UPDATE consignors SET is_active = FALSE WHERE id = $1 AND business = $2 RETURNING id',
+        [req.params.id, req.business]
       );
       if (!result.rows[0]) throw new HttpError(404, 'Penitip tidak ditemukan');
       await logAudit(pool, { userId: req.user.id, action: 'deactivate', entity: 'consignors', entityId: Number(req.params.id) });
       return res.json({ message: 'Penitip dinonaktifkan (masih terkait produk)' });
     }
-    const result = await pool.query('DELETE FROM consignors WHERE id = $1 RETURNING id', [req.params.id]);
+    const result = await pool.query(
+      'DELETE FROM consignors WHERE id = $1 AND business = $2 RETURNING id',
+      [req.params.id, req.business]
+    );
     if (!result.rows[0]) throw new HttpError(404, 'Penitip tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'delete', entity: 'consignors', entityId: Number(req.params.id) });
     res.json({ message: 'Penitip dihapus' });
@@ -164,8 +177,8 @@ router.get('/products', async (req, res, next) => {
     const { page, limit, offset } = getPagination(req.query);
     const consignorId = toInt(req.query.consignor_id, 0);
 
-    const conditions = ['p.is_consignment = TRUE'];
-    const params = [];
+    const conditions = ['p.is_consignment = TRUE', 'p.business = $1'];
+    const params = [req.business];
     if (consignorId > 0) {
       params.push(consignorId);
       conditions.push(`p.consignor_id = $${params.length}`);
@@ -197,7 +210,7 @@ router.get('/sales', async (req, res, next) => {
     const { from, to } = resolveRange(req.query);
     const consignorId = toInt(req.query.consignor_id, 0);
 
-    const params = [from, to];
+    const params = [from, to, req.business];
     let filter = '';
     if (consignorId > 0) {
       params.push(consignorId);
@@ -214,7 +227,7 @@ router.get('/sales', async (req, res, next) => {
        JOIN sales s ON s.id = si.sale_id
        JOIN products p ON p.id = si.product_id
        LEFT JOIN consignors c ON c.id = p.consignor_id
-       WHERE s.status = 'completed' AND p.is_consignment = TRUE
+       WHERE s.status = 'completed' AND p.is_consignment = TRUE AND p.business = $3
          AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
          ${filter}
        GROUP BY p.consignor_id, c.name
@@ -233,7 +246,7 @@ router.get('/sales', async (req, res, next) => {
        JOIN sales s ON s.id = si.sale_id
        JOIN products p ON p.id = si.product_id
        LEFT JOIN consignors c ON c.id = p.consignor_id
-       WHERE s.status = 'completed' AND p.is_consignment = TRUE
+       WHERE s.status = 'completed' AND p.is_consignment = TRUE AND p.business = $3
          AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
          ${filter}
        GROUP BY p.id, p.sku, p.name, p.base_unit, c.name
@@ -265,7 +278,7 @@ router.get('/sales', async (req, res, next) => {
 // =========================================================
 router.get('/payables', async (req, res, next) => {
   try {
-    const result = await pool.query(`${PAYABLE_SQL} ORDER BY payable DESC, c.name`);
+    const result = await pool.query(`${PAYABLE_SQL} WHERE c.business = $1 ORDER BY payable DESC, c.name`, [req.business]);
     res.json({
       rows: result.rows.map((r) => ({
         ...r,
@@ -284,13 +297,13 @@ router.get('/payouts', async (req, res, next) => {
     const { page, limit, offset } = getPagination(req.query);
     const consignorId = toInt(req.query.consignor_id, 0);
 
-    const params = [];
-    const conditions = [];
+    const params = [req.business];
+    const conditions = ['cp.business = $1'];
     if (consignorId > 0) {
       params.push(consignorId);
       conditions.push(`cp.consignor_id = $${params.length}`);
     }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const where = `WHERE ${conditions.join(' AND ')}`;
 
     const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM consignment_payouts cp ${where}`, params);
     params.push(limit, offset);
@@ -323,7 +336,7 @@ router.post('/payouts', async (req, res, next) => {
     if (periodTo && !isValidDate(periodTo)) throw new HttpError(400, 'period_to tidak valid');
 
     const created = await withTransaction(async (client) => {
-      const consignor = await client.query('SELECT * FROM consignors WHERE id = $1 FOR UPDATE', [consignorId]);
+      const consignor = await client.query('SELECT * FROM consignors WHERE id = $1 AND business = $2 FOR UPDATE', [consignorId, req.business]);
       if (!consignor.rows[0]) throw new HttpError(404, 'Penitip tidak ditemukan');
 
       const payableResult = await client.query(
@@ -346,9 +359,9 @@ router.post('/payouts', async (req, res, next) => {
       }
 
       const result = await client.query(
-        `INSERT INTO consignment_payouts (consignor_id, amount, period_from, period_to, note, user_id)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-        [consignorId, amount, periodFrom, periodTo, cleanString(req.body?.note, 500), req.user.id]
+        `INSERT INTO consignment_payouts (consignor_id, amount, period_from, period_to, note, user_id, business)
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [consignorId, amount, periodFrom, periodTo, cleanString(req.body?.note, 500), req.user.id, req.business]
       );
       return result.rows[0];
     });

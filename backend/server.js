@@ -5,7 +5,7 @@ require('dotenv').config();
 
 const pool = require('./db');
 const { errorHandler, notFoundHandler } = require('./middleware/error');
-const { verifyJwt } = require('./middleware/auth');
+const { verifyJwt, resolveBusiness } = require('./middleware/auth');
 const { ensureDir, uploadRoot } = require('./utils/upload');
 
 const app = express();
@@ -38,11 +38,13 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // Login satu-satunya endpoint publik; seluruh /api lainnya wajib JWT.
+// resolveBusiness menetapkan req.business dari header X-Business (default
+// 'minimarket' bila tidak dikirim, agar klien lama tetap kompatibel).
 const PUBLIC_API_PATHS = new Set(['/api/auth/login']);
 app.use('/api', (req, res, next) => {
   const path = req.originalUrl.split('?')[0];
-  if (PUBLIC_API_PATHS.has(path)) return next();
-  return verifyJwt(req, res, next);
+  if (PUBLIC_API_PATHS.has(path)) return resolveBusiness(req, res, next);
+  return verifyJwt(req, res, (err) => (err ? next(err) : resolveBusiness(req, res, next)));
 });
 
 app.use('/api/auth', require('./routes/auth'));
@@ -64,6 +66,8 @@ app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/sales', require('./routes/sales'));
 app.use('/api/returns', require('./routes/returns'));
 app.use('/api/shifts', require('./routes/shifts'));
+app.use('/api/print-services', require('./routes/print_services'));
+app.use('/api/print-orders', require('./routes/print_orders'));
 app.use('/api/reports', require('./routes/reports'));
 
 app.use('/api', notFoundHandler);
@@ -121,10 +125,10 @@ const assertFeatureSchema = async () => {
             WHERE table_name = 'users' AND column_name = 'permissions'`,
     },
     {
-      name: "CHECK role users (admin/kasir/gudang)",
+      name: "CHECK role users (admin/kasir/gudang/operator)",
       sql: `SELECT COUNT(*)::int AS ok FROM pg_constraint
             WHERE conname = 'users_role_check'
-              AND pg_get_constraintdef(oid) LIKE '%gudang%'`,
+              AND pg_get_constraintdef(oid) LIKE '%operator%'`,
     },
     // P6: invoice grosir kredit & piutang.
     { name: 'tabel customers', sql: "SELECT to_regclass('public.customers') AS ok" },
@@ -140,6 +144,33 @@ const assertFeatureSchema = async () => {
       sql: `SELECT COUNT(*)::int AS ok FROM pg_constraint
             WHERE conname = 'sales_payment_status_check'`,
     },
+    // P7: multi-usaha (minimarket + fotokopi).
+    {
+      name: 'kolom users.business',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'business'`,
+    },
+    {
+      name: 'kolom sales.business',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'sales' AND column_name = 'business'`,
+    },
+    { name: 'tabel business_settings', sql: "SELECT to_regclass('public.business_settings') AS ok" },
+    { name: 'tabel print_services', sql: "SELECT to_regclass('public.print_services') AS ok" },
+    { name: 'tabel print_orders', sql: "SELECT to_regclass('public.print_orders') AS ok" },
+    { name: 'tabel print_order_items', sql: "SELECT to_regclass('public.print_order_items') AS ok" },
+    {
+      name: 'kolom sale_items.service_id',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'sale_items' AND column_name = 'service_id'`,
+    },
+    // P8: jual ATK di mode fotokopi (baris produk pada pesanan).
+    {
+      name: 'kolom print_order_items.product_id/base_qty/cost_price',
+      sql: `SELECT COUNT(*)::int AS ok FROM information_schema.columns
+            WHERE table_name = 'print_order_items'
+              AND column_name IN ('product_id', 'base_qty', 'cost_price')`,
+    },
   ];
 
   for (const check of required) {
@@ -148,7 +179,8 @@ const assertFeatureSchema = async () => {
     const expected = check.name.startsWith('kolom sale_items.promo_id') ? 2
       : check.name.startsWith('kolom products.is_consignment') ? 2
         : check.name.startsWith('kolom sales.customer_id') ? 5
-          : null;
+          : check.name.startsWith('kolom print_order_items.product_id') ? 3
+            : null;
     const ok = expected === null ? Boolean(row.ok) : row.ok === expected;
     if (!ok) {
       throw new Error(

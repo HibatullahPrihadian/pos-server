@@ -11,7 +11,10 @@ router.get('/', async (req, res, next) => {
   try {
     const includeInactive = toBool(req.query.include_inactive, false);
     const result = await pool.query(
-      `SELECT * FROM suppliers ${includeInactive ? '' : 'WHERE is_active = TRUE'} ORDER BY name`
+      `SELECT * FROM suppliers
+       WHERE business = $1 ${includeInactive ? '' : 'AND is_active = TRUE'}
+       ORDER BY name`,
+      [req.business]
     );
     res.json(result.rows);
   } catch (err) {
@@ -21,7 +24,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const result = await pool.query('SELECT * FROM suppliers WHERE id = $1', [req.params.id]);
+    const result = await pool.query('SELECT * FROM suppliers WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Supplier tidak ditemukan');
     res.json(result.rows[0]);
   } catch (err) {
@@ -34,12 +37,13 @@ router.post('/', requirePermission('supplier.manage'), async (req, res, next) =>
     const name = requireString(req.body?.name, 'Nama supplier', 150);
     if (name.error) throw new HttpError(400, name.error);
     const result = await pool.query(
-      'INSERT INTO suppliers (name, phone, address, note) VALUES ($1, $2, $3, $4) RETURNING *',
+      'INSERT INTO suppliers (name, phone, address, note, business) VALUES ($1, $2, $3, $4, $5) RETURNING *',
       [
         name.value,
         cleanString(req.body?.phone, 50),
         cleanString(req.body?.address, 500),
         cleanString(req.body?.note, 500),
+        req.business,
       ]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'suppliers', entityId: result.rows[0].id });
@@ -57,7 +61,7 @@ router.put('/:id', requirePermission('supplier.manage'), async (req, res, next) 
 
     const result = await pool.query(
       `UPDATE suppliers SET name = $1, phone = $2, address = $3, note = $4, is_active = $5
-       WHERE id = $6 RETURNING *`,
+       WHERE id = $6 AND business = $7 RETURNING *`,
       [
         name.value,
         cleanString(req.body?.phone, 50),
@@ -65,6 +69,7 @@ router.put('/:id', requirePermission('supplier.manage'), async (req, res, next) 
         cleanString(req.body?.note, 500),
         isActive,
         req.params.id,
+        req.business,
       ]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Supplier tidak ditemukan');
@@ -78,12 +83,15 @@ router.put('/:id', requirePermission('supplier.manage'), async (req, res, next) 
 router.delete('/:id', requirePermission('supplier.manage'), async (req, res, next) => {
   try {
     const used = await pool.query(
-      'SELECT COUNT(*)::int AS n FROM products WHERE supplier_id = $1',
-      [req.params.id]
+      'SELECT COUNT(*)::int AS n FROM products WHERE supplier_id = $1 AND business = $2',
+      [req.params.id, req.business]
     );
     if (used.rows[0].n > 0) throw new HttpError(409, 'Supplier masih dipakai produk');
 
-    const result = await pool.query('DELETE FROM suppliers WHERE id = $1 RETURNING id', [req.params.id]);
+    const result = await pool.query(
+      'DELETE FROM suppliers WHERE id = $1 AND business = $2 RETURNING id',
+      [req.params.id, req.business]
+    );
     if (!result.rows[0]) throw new HttpError(404, 'Supplier tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'delete', entity: 'suppliers', entityId: Number(req.params.id) });
     res.json({ message: 'Supplier dihapus' });

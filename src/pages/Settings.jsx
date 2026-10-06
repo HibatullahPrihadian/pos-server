@@ -3,6 +3,7 @@ import { Save, Upload, QrCode } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
 import { useSettings } from '../context/SettingsContext';
+import { useBusiness } from '../context/BusinessContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -12,6 +13,7 @@ import Spinner from '../components/ui/Spinner';
 const Settings = () => {
   const toast = useToastContext();
   const { settings, setSettings, reload } = useSettings();
+  const { business } = useBusiness();
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -100,6 +102,8 @@ const Settings = () => {
           </div>
         </Card>
 
+        {/* Poin/stok hanya berlaku untuk minimarket; mode lain memakai setelan usaha. */}
+        {business === 'minimarket' && (
         <Card title="Poin Member">
           <div className="space-y-4">
             <Input label="Rupiah per 1 Poin (earning)" type="number" value={form.point_earn_per_amount} onChange={(e) => setForm({ ...form, point_earn_per_amount: e.target.value })} />
@@ -119,6 +123,7 @@ const Settings = () => {
             </Input>
           </div>
         </Card>
+        )}
 
         <Card title="QRIS Toko (Statis)">
           <div className="space-y-4">

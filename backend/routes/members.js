@@ -23,8 +23,9 @@ router.get('/', async (req, res, next) => {
     const search = cleanString(req.query.search, 100);
     const activeOnly = req.query.is_active === undefined ? true : toBool(req.query.is_active, true);
 
-    const conditions = [];
-    const params = [];
+    // Member dipisah per usaha; tanpa header, default 'minimarket' = perilaku lama.
+    const conditions = ['business = $1'];
+    const params = [req.business];
     if (activeOnly) conditions.push('is_active = TRUE');
     if (search) {
       params.push(`%${search.toLowerCase()}%`);
@@ -49,7 +50,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const result = await pool.query('SELECT * FROM members WHERE id = $1', [req.params.id]);
+    const result = await pool.query('SELECT * FROM members WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Member tidak ditemukan');
     res.json(result.rows[0]);
   } catch (err) {
@@ -67,8 +68,8 @@ router.post('/', requirePermission('member.manage'), async (req, res, next) => {
     const code = cleanString(req.body?.code, 30) || (await nextMemberCode(pool));
 
     const result = await pool.query(
-      'INSERT INTO members (code, name, phone, email) VALUES ($1, $2, $3, $4) RETURNING *',
-      [code, name.value, phone, email]
+      'INSERT INTO members (code, name, phone, email, business) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+      [code, name.value, phone, email, req.business]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'members', entityId: result.rows[0].id });
     res.status(201).json(result.rows[0]);
@@ -84,8 +85,8 @@ router.put('/:id', requirePermission('member.manage'), async (req, res, next) =>
     const isActive = toBool(req.body?.is_active, true);
 
     const result = await pool.query(
-      'UPDATE members SET name = $1, phone = $2, email = $3, is_active = $4 WHERE id = $5 RETURNING *',
-      [name.value, cleanString(req.body?.phone, 50), cleanString(req.body?.email, 120), isActive, req.params.id]
+      'UPDATE members SET name = $1, phone = $2, email = $3, is_active = $4 WHERE id = $5 AND business = $6 RETURNING *',
+      [name.value, cleanString(req.body?.phone, 50), cleanString(req.body?.email, 120), isActive, req.params.id, req.business]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Member tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'update', entity: 'members', entityId: Number(req.params.id) });
@@ -98,8 +99,8 @@ router.put('/:id', requirePermission('member.manage'), async (req, res, next) =>
 router.delete('/:id', requirePermission('member.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(
-      'UPDATE members SET is_active = FALSE WHERE id = $1 RETURNING id',
-      [req.params.id]
+      'UPDATE members SET is_active = FALSE WHERE id = $1 AND business = $2 RETURNING id',
+      [req.params.id, req.business]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Member tidak ditemukan');
     res.json({ message: 'Member dinonaktifkan' });
@@ -110,7 +111,7 @@ router.delete('/:id', requirePermission('member.manage'), async (req, res, next)
 
 router.get('/:id/points', async (req, res, next) => {
   try {
-    const member = await pool.query('SELECT id, code, name, points FROM members WHERE id = $1', [req.params.id]);
+    const member = await pool.query('SELECT id, code, name, points FROM members WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!member.rows[0]) throw new HttpError(404, 'Member tidak ditemukan');
 
     const logs = await pool.query(
@@ -134,9 +135,9 @@ router.post('/:id/points/adjust', requirePermission('member.manage'), async (req
 
     const result = await pool.query(
       `UPDATE members SET points = points + $1
-       WHERE id = $2 AND points + $1 >= 0
+       WHERE id = $2 AND business = $3 AND points + $1 >= 0
        RETURNING id, code, name, points`,
-      [change, req.params.id]
+      [change, req.params.id, req.business]
     );
     if (!result.rows[0]) {
       throw new HttpError(400, 'Member tidak ditemukan atau saldo poin tidak mencukupi');

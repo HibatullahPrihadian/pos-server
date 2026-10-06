@@ -135,7 +135,7 @@ router.get('/:id/barcode.svg', requirePermission('bundle.manage'), async (req, r
     const id = toInt(req.params.id, 0);
     if (id <= 0) throw new HttpError(404, 'Paket tidak ditemukan');
 
-    const result = await pool.query('SELECT barcode FROM bundles WHERE id = $1', [id]);
+    const result = await pool.query('SELECT barcode FROM bundles WHERE id = $1 AND business = $2', [id, req.business]);
     const bundle = result.rows[0];
     if (!bundle) throw new HttpError(404, 'Paket tidak ditemukan');
     if (!bundle.barcode) throw new HttpError(404, 'Paket belum memiliki barcode');
@@ -157,9 +157,9 @@ router.post('/barcodes/render', requirePermission('bundle.manage'), async (req, 
 
     const result = await pool.query(
       `SELECT id, name, sku, barcode, price FROM bundles
-       WHERE id = ANY($1::int[]) AND barcode IS NOT NULL AND barcode <> ''
+       WHERE id = ANY($1::int[]) AND business = $2 AND barcode IS NOT NULL AND barcode <> ''
        ORDER BY name`,
-      [ids]
+      [ids, req.business]
     );
 
     const items = result.rows.map((row) => {
@@ -184,7 +184,7 @@ router.get('/barcode/:barcode', async (req, res, next) => {
     const barcode = cleanString(req.params.barcode, 50);
     if (!barcode) throw new HttpError(400, 'Barcode wajib diisi');
 
-    const result = await pool.query(`${SELECT_BUNDLE} WHERE b.barcode = $1 AND b.is_active = TRUE`, [barcode]);
+    const result = await pool.query(`${SELECT_BUNDLE} WHERE b.barcode = $1 AND b.business = $2 AND b.is_active = TRUE`, [barcode, req.business]);
     const bundle = result.rows[0];
     if (!bundle) throw new HttpError(404, 'Paket tidak ditemukan');
 
@@ -199,12 +199,17 @@ router.get('/', async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query);
     const activeOnly = toBool(req.query.is_active, false);
-    const where = activeOnly ? 'WHERE b.is_active = TRUE' : '';
+    const params = [req.business];
+    const conditions = ['b.business = $1'];
+    if (activeOnly) conditions.push('b.is_active = TRUE');
+    const where = `WHERE ${conditions.join(' AND ')}`;
 
-    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM bundles b ${where}`);
+    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM bundles b ${where}`, params);
+    params.push(limit, offset);
     const result = await pool.query(
-      `${SELECT_BUNDLE} ${where} ORDER BY b.is_active DESC, b.id DESC LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      `${SELECT_BUNDLE} ${where} ORDER BY b.is_active DESC, b.id DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
     );
     res.json(paginated(result.rows, countResult.rows[0].total, page, limit));
   } catch (err) {
@@ -214,7 +219,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const result = await pool.query(`${SELECT_BUNDLE} WHERE b.id = $1`, [req.params.id]);
+    const result = await pool.query(`${SELECT_BUNDLE} WHERE b.id = $1 AND b.business = $2`, [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');
     res.json({ ...result.rows[0], items: await loadItems(pool, req.params.id) });
   } catch (err) {
@@ -242,9 +247,9 @@ router.post('/', requirePermission('bundle.manage'), async (req, res, next) => {
       await assertComponentsExist(client, items);
       await validateBundleBarcode(client, barcode);
       const result = await client.query(
-        `INSERT INTO bundles (sku, name, barcode, price, is_active)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [sku.value, name.value, barcode, price, isActive]
+        `INSERT INTO bundles (sku, name, barcode, price, is_active, business)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [sku.value, name.value, barcode, price, isActive, req.business]
       );
       await replaceItems(client, result.rows[0].id, items);
       return result.rows[0];
@@ -259,7 +264,7 @@ router.post('/', requirePermission('bundle.manage'), async (req, res, next) => {
 
 router.put('/:id', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
-    const existing = await pool.query('SELECT * FROM bundles WHERE id = $1', [req.params.id]);
+    const existing = await pool.query('SELECT * FROM bundles WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!existing.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');
 
     const value = {};
@@ -298,13 +303,17 @@ router.put('/:id', requirePermission('bundle.manage'), async (req, res, next) =>
       if (keys.length > 0) {
         const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
         const params = keys.map((key) => value[key]);
-        params.push(req.params.id);
+        params.push(req.params.id, req.business);
         await client.query(
-          `UPDATE bundles SET ${setClause}, updated_at = NOW() WHERE id = $${params.length}`,
+          `UPDATE bundles SET ${setClause}, updated_at = NOW()
+           WHERE id = $${params.length - 1} AND business = $${params.length}`,
           params
         );
       } else {
-        await client.query('UPDATE bundles SET updated_at = NOW() WHERE id = $1', [req.params.id]);
+        await client.query(
+          'UPDATE bundles SET updated_at = NOW() WHERE id = $1 AND business = $2',
+          [req.params.id, req.business]
+        );
       }
 
       if (hasItems) {
@@ -314,7 +323,7 @@ router.put('/:id', requirePermission('bundle.manage'), async (req, res, next) =>
     });
 
     await logAudit(pool, { userId: req.user.id, action: 'update', entity: 'bundles', entityId: Number(req.params.id) });
-    const result = await pool.query(`${SELECT_BUNDLE} WHERE b.id = $1`, [req.params.id]);
+    const result = await pool.query(`${SELECT_BUNDLE} WHERE b.id = $1 AND b.business = $2`, [req.params.id, req.business]);
     res.json({ ...result.rows[0], items: await loadItems(pool, req.params.id) });
   } catch (err) {
     next(err);
@@ -323,19 +332,28 @@ router.put('/:id', requirePermission('bundle.manage'), async (req, res, next) =>
 
 router.delete('/:id', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
+    const owned = await pool.query(
+      'SELECT id FROM bundles WHERE id = $1 AND business = $2',
+      [req.params.id, req.business]
+    );
+    if (!owned.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');
+
     const used = await pool.query('SELECT COUNT(*)::int AS n FROM sale_items WHERE bundle_id = $1', [req.params.id]);
     if (used.rows[0].n > 0) {
       // Paket sudah dipakai transaksi; nonaktifkan saja agar riwayat tetap utuh.
       const result = await pool.query(
-        'UPDATE bundles SET is_active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id',
-        [req.params.id]
+        'UPDATE bundles SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND business = $2 RETURNING id',
+        [req.params.id, req.business]
       );
       if (!result.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');
       await logAudit(pool, { userId: req.user.id, action: 'deactivate', entity: 'bundles', entityId: Number(req.params.id) });
       return res.json({ message: 'Paket dinonaktifkan (sudah dipakai transaksi)' });
     }
 
-    const result = await pool.query('DELETE FROM bundles WHERE id = $1 RETURNING id', [req.params.id]);
+    const result = await pool.query(
+      'DELETE FROM bundles WHERE id = $1 AND business = $2 RETURNING id',
+      [req.params.id, req.business]
+    );
     if (!result.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'delete', entity: 'bundles', entityId: Number(req.params.id) });
     res.json({ message: 'Paket dihapus' });
@@ -346,7 +364,10 @@ router.delete('/:id', requirePermission('bundle.manage'), async (req, res, next)
 
 router.get('/:id/items', async (req, res, next) => {
   try {
-    const bundle = await pool.query('SELECT id FROM bundles WHERE id = $1', [req.params.id]);
+    const bundle = await pool.query(
+      'SELECT id FROM bundles WHERE id = $1 AND business = $2',
+      [req.params.id, req.business]
+    );
     if (!bundle.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');
     res.json(await loadItems(pool, req.params.id));
   } catch (err) {
@@ -356,7 +377,10 @@ router.get('/:id/items', async (req, res, next) => {
 
 router.put('/:id/items', requirePermission('bundle.manage'), async (req, res, next) => {
   try {
-    const bundle = await pool.query('SELECT id FROM bundles WHERE id = $1', [req.params.id]);
+    const bundle = await pool.query(
+      'SELECT id FROM bundles WHERE id = $1 AND business = $2',
+      [req.params.id, req.business]
+    );
     if (!bundle.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');
 
     const { items, error } = normalizeItems(req.body?.items);

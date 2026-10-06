@@ -1,6 +1,7 @@
 const express = require('express');
 const pool = require('../db');
 const { verifyJwt, requirePermission } = require('../middleware/auth');
+const { HttpError } = require('../middleware/error');
 const { isValidDate } = require('../utils/validate');
 const { toInt } = require('../utils/pagination');
 const { sendCsv } = require('../utils/csv');
@@ -8,7 +9,133 @@ const { getReceivableSummary } = require('../utils/receivables');
 
 const router = express.Router();
 
-router.use(verifyJwt, requirePermission('report.view'));
+router.use(verifyJwt);
+
+// =========================================================
+// Laporan fotokopi — didaftarkan SEBELUM guard report.view agar operator
+// fotokopi (print.report) tidak perlu izin laporan minimarket.
+// =========================================================
+router.get('/print-summary', requirePermission('print.report', 'report.view'), async (req, res, next) => {
+  try {
+    const { from, to } = resolveRange(req.query);
+    const result = await pool.query(
+      `SELECT po.created_at::date AS date,
+              COUNT(*)::int AS order_count,
+              COALESCE(SUM(po.subtotal), 0)::bigint AS subtotal,
+              COALESCE(SUM(po.discount), 0)::bigint AS discount,
+              COALESCE(SUM(po.tax_total), 0)::bigint AS tax_total,
+              COALESCE(SUM(po.grand_total), 0)::bigint AS grand_total
+       FROM print_orders po
+       WHERE po.business = $1 AND po.payment_status = 'paid' AND po.status <> 'cancelled'
+         AND po.created_at >= $2::date AND po.created_at < ($3::date + INTERVAL '1 day')
+       GROUP BY po.created_at::date
+       ORDER BY po.created_at::date DESC`,
+      [req.business, from, to]
+    );
+
+    const rows = result.rows.map((r) => ({
+      date: toIso(r.date),
+      order_count: r.order_count,
+      subtotal: Number(r.subtotal),
+      discount: Number(r.discount),
+      tax_total: Number(r.tax_total),
+      grand_total: Number(r.grand_total),
+    }));
+
+    if (wantsCsv(req.query)) {
+      return sendCsv(res, `fotokopi-penjualan-${from}_${to}.csv`, rows, [
+        'date', 'order_count', 'subtotal', 'discount', 'tax_total', 'grand_total',
+      ]);
+    }
+
+    const totals = rows.reduce(
+      (acc, r) => ({
+        order_count: acc.order_count + r.order_count,
+        grand_total: acc.grand_total + r.grand_total,
+        tax_total: acc.tax_total + r.tax_total,
+      }),
+      { order_count: 0, grand_total: 0, tax_total: 0 }
+    );
+    res.json({ from, to, rows, totals });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/print-top-services', requirePermission('print.report', 'report.view'), async (req, res, next) => {
+  try {
+    const { from, to } = resolveRange(req.query);
+    const limit = Math.min(100, Math.max(1, toInt(req.query.limit, 20)));
+    const result = await pool.query(
+      `SELECT ps.id AS service_id, ps.name AS service_name, ps.category,
+              SUM(poi.qty)::int AS sheets,
+              COUNT(*)::int AS item_count,
+              COALESCE(SUM(poi.line_total), 0)::bigint AS revenue
+       FROM print_order_items poi
+       JOIN print_orders po ON po.id = poi.order_id
+       JOIN print_services ps ON ps.id = poi.service_id
+       WHERE po.business = $1 AND po.payment_status = 'paid' AND po.status <> 'cancelled'
+         AND po.created_at >= $2::date AND po.created_at < ($3::date + INTERVAL '1 day')
+       GROUP BY ps.id, ps.name, ps.category
+       ORDER BY revenue DESC
+       LIMIT $4`,
+      [req.business, from, to, limit]
+    );
+
+    const rows = result.rows.map((r) => ({
+      service_id: r.service_id,
+      service_name: r.service_name,
+      category: r.category || '',
+      sheets: r.sheets,
+      item_count: r.item_count,
+      revenue: Number(r.revenue),
+    }));
+
+    if (wantsCsv(req.query)) {
+      return sendCsv(res, `fotokopi-jasa-${from}_${to}.csv`, rows, [
+        'service_id', 'service_name', 'category', 'sheets', 'item_count', 'revenue',
+      ]);
+    }
+    res.json({ from, to, rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/print-queue-stats', requirePermission('print.report', 'print.use', 'report.view'), async (req, res, next) => {
+  try {
+    const { from, to } = resolveRange(req.query);
+    const result = await pool.query(
+      `SELECT status,
+              COUNT(*)::int AS n,
+              COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN 1 ELSE 0 END), 0)::int AS paid
+       FROM print_orders
+       WHERE business = $1
+         AND created_at >= $2::date AND created_at < ($3::date + INTERVAL '1 day')
+       GROUP BY status`,
+      [req.business, from, to]
+    );
+    const byStatus = Object.fromEntries(result.rows.map((r) => [r.status, r.n]));
+    res.json({
+      from,
+      to,
+      by_status: {
+        queued: byStatus.queued || 0,
+        processing: byStatus.processing || 0,
+        ready: byStatus.ready || 0,
+        picked_up: byStatus.picked_up || 0,
+        cancelled: byStatus.cancelled || 0,
+      },
+      total: result.rows.reduce((sum, r) => sum + r.n, 0),
+      paid: result.rows.reduce((sum, r) => sum + r.paid, 0),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Sisanya adalah laporan minimarket (butuh report.view).
+router.use(requirePermission('report.view'));
 
 // Zona waktu toko untuk "hari ini"/"bulan ini" pada pembelian. purchases.date diisi
 // dari tanggal lokal klien (WIB), sedangkan sesi DB berjalan di UTC — pin zona waktu
@@ -49,6 +176,7 @@ const RETURN_COGS_EXPR = `
 const returnCogsJoin = `
   FROM return_items ri
   JOIN returns r ON r.id = ri.return_id
+  JOIN sales s ON s.id = r.sale_id
   LEFT JOIN sale_items si ON si.id = ri.sale_item_id
 `;
 
@@ -69,18 +197,19 @@ router.get('/sales-summary', async (req, res, next) => {
          COALESCE(SUM(s.tax_total), 0)::bigint AS tax_total,
          COALESCE(SUM(s.grand_total), 0)::bigint AS grand_total
        FROM sales s
-       WHERE s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
+       WHERE s.business = $3 AND s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
        GROUP BY s.created_at::date
        ORDER BY s.created_at::date DESC`,
-      [from, to]
+      [from, to, req.business]
     );
 
     const returnsResult = await pool.query(
       `SELECT r.created_at::date AS date, COALESCE(SUM(r.total), 0)::bigint AS refund_total
        FROM returns r
-       WHERE r.created_at >= $1::date AND r.created_at < ($2::date + INTERVAL '1 day')
+       JOIN sales s ON s.id = r.sale_id
+       WHERE s.business = $3 AND r.created_at >= $1::date AND r.created_at < ($2::date + INTERVAL '1 day')
        GROUP BY r.created_at::date`,
-      [from, to]
+      [from, to, req.business]
     );
     const refundMap = new Map(returnsResult.rows.map((r) => [toIso(r.date), Number(r.refund_total)]));
 
@@ -131,10 +260,10 @@ router.get('/by-cashier', async (req, res, next) => {
               COALESCE(SUM(s.grand_total - s.tax_total), 0)::bigint AS net_sales
        FROM sales s
        JOIN users u ON u.id = s.cashier_id
-       WHERE s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
+       WHERE s.business = $3 AND s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
        GROUP BY u.id, u.full_name
        ORDER BY grand_total DESC`,
-      [from, to]
+      [from, to, req.business]
     );
 
     const rows = result.rows.map((r) => ({
@@ -168,10 +297,10 @@ router.get('/by-payment', async (req, res, next) => {
               COALESCE(SUM(sp.amount), 0)::bigint AS total
        FROM sale_payments sp
        JOIN sales s ON s.id = sp.sale_id
-       WHERE s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
+       WHERE s.business = $3 AND s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
        GROUP BY sp.method
        ORDER BY total DESC`,
-      [from, to]
+      [from, to, req.business]
     );
 
     const rows = result.rows.map((r) => ({ method: r.method, txn_count: r.txn_count, total: Number(r.total) }));
@@ -198,8 +327,8 @@ router.get('/gross-profit', async (req, res, next) => {
          ${GROSS_PROFIT_EXPR} AS gross_profit
        FROM sale_items si
        JOIN sales s ON s.id = si.sale_id
-       WHERE s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')`,
-      [from, to]
+       WHERE s.business = $3 AND s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')`,
+      [from, to, req.business]
     );
 
     const daily = await pool.query(
@@ -209,10 +338,10 @@ router.get('/gross-profit', async (req, res, next) => {
               ${GROSS_PROFIT_EXPR} AS gross_profit
        FROM sale_items si
        JOIN sales s ON s.id = si.sale_id
-       WHERE s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
+       WHERE s.business = $3 AND s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
        GROUP BY s.created_at::date
        ORDER BY s.created_at::date DESC`,
-      [from, to]
+      [from, to, req.business]
     );
 
     const summary = {
@@ -244,7 +373,8 @@ router.get('/gross-profit', async (req, res, next) => {
 router.get('/profit-loss', async (req, res, next) => {
   try {
     const { from, to } = resolveRange(req.query);
-    const rangeParams = [from, to];
+    // Query berbasis sales/expenses/purchases ikut difilter per usaha.
+    const scopedParams = [from, to, req.business];
 
     // Penjualan & HPP (harian + total) hanya untuk transaksi completed.
     const salesResult = await pool.query(
@@ -253,9 +383,9 @@ router.get('/profit-loss', async (req, res, next) => {
               COALESCE(SUM(si.cost_price * si.qty), 0)::bigint AS cogs
        FROM sale_items si
        JOIN sales s ON s.id = si.sale_id
-       WHERE s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
+       WHERE s.business = $3 AND s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
        GROUP BY s.created_at::date`,
-      rangeParams
+      scopedParams
     );
 
     // Retur per hari: refund (kas keluar) dan HPP barang yang kembali ke stok.
@@ -264,18 +394,18 @@ router.get('/profit-loss', async (req, res, next) => {
               COALESCE(SUM(ri.refund_amount), 0)::bigint AS return_refund,
               ${RETURN_COGS_EXPR} AS return_cogs
        ${returnCogsJoin}
-       WHERE r.created_at >= $1::date AND r.created_at < ($2::date + INTERVAL '1 day')
+       WHERE s.business = $3 AND r.created_at >= $1::date AND r.created_at < ($2::date + INTERVAL '1 day')
        GROUP BY r.created_at::date`,
-      rangeParams
+      scopedParams
     );
 
     // Beban operasional per hari (basis akrual: memakai `amount`, bukan `paid_amount`).
     const expenseResult = await pool.query(
       `SELECT e.date AS date, COALESCE(SUM(e.amount), 0)::bigint AS expense
        FROM expenses e
-       WHERE e.date >= $1::date AND e.date <= $2::date
+       WHERE e.business = $3 AND e.date >= $1::date AND e.date <= $2::date
        GROUP BY e.date`,
-      rangeParams
+      scopedParams
     );
 
     // Beban per kategori (periode).
@@ -284,32 +414,32 @@ router.get('/profit-loss', async (req, res, next) => {
               COALESCE(SUM(e.amount), 0)::bigint AS amount
        FROM expenses e
        LEFT JOIN expense_categories ec ON ec.id = e.expense_category_id
-       WHERE e.date >= $1::date AND e.date <= $2::date
+       WHERE e.business = $3 AND e.date >= $1::date AND e.date <= $2::date
        GROUP BY COALESCE(ec.name, 'Tanpa Kategori')
        ORDER BY amount DESC`,
-      rangeParams
+      scopedParams
     );
 
     // Baris informasi (TIDAK mengurangi laba).
     const purchaseResult = await pool.query(
       `SELECT COALESCE(SUM(total), 0)::bigint AS purchase_total
        FROM purchases
-       WHERE status <> 'cancelled' AND date >= $1::date AND date <= $2::date`,
-      rangeParams
+       WHERE business = $3 AND status <> 'cancelled' AND date >= $1::date AND date <= $2::date`,
+      scopedParams
     );
     // Modal: hanya PO yang sudah dibayar penuh (pola sama dengan /purchase-paid).
     const purchasePaidResult = await pool.query(
       `SELECT COALESCE(SUM(total), 0)::bigint AS purchase_paid
        FROM purchases
-       WHERE payment_status = 'paid' AND status <> 'cancelled'
+       WHERE business = $3 AND payment_status = 'paid' AND status <> 'cancelled'
          AND date >= $1::date AND date <= $2::date`,
-      rangeParams
+      scopedParams
     );
     const payoutResult = await pool.query(
       `SELECT COALESCE(SUM(amount), 0)::bigint AS consignment_payout
        FROM consignment_payouts
-       WHERE created_at >= $1::date AND created_at < ($2::date + INTERVAL '1 day')`,
-      rangeParams
+       WHERE business = $3 AND created_at >= $1::date AND created_at < ($2::date + INTERVAL '1 day')`,
+      scopedParams
     );
 
     const salesMap = new Map(salesResult.rows.map((r) => [toIso(r.date), r]));
@@ -400,7 +530,8 @@ router.get('/purchase-paid', async (req, res, next) => {
   try {
     const { from, to } = resolveRange(req.query);
     const params = [from, to];
-    const conditions = ["pu.payment_status = 'paid'", "pu.status <> 'cancelled'", 'pu.date >= $1::date', 'pu.date <= $2::date'];
+    const conditions = ["pu.payment_status = 'paid'", "pu.status <> 'cancelled'", 'pu.date >= $1::date', 'pu.date <= $2::date', 'pu.business = $3'];
+    params.push(req.business);
 
     const supplierId = Number(req.query.supplier_id);
     if (Number.isInteger(supplierId) && supplierId > 0) {
@@ -486,11 +617,11 @@ router.get('/top-products', async (req, res, next) => {
        FROM sale_items si
        JOIN sales s ON s.id = si.sale_id
        JOIN products p ON p.id = si.product_id
-       WHERE s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
+       WHERE s.business = $3 AND s.status = 'completed' AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
        GROUP BY p.id, p.sku, p.name, p.base_unit
        ORDER BY qty_sold DESC
-       LIMIT $3`,
-      [from, to, limit]
+       LIMIT $4`,
+      [from, to, req.business, limit]
     );
 
     const rows = result.rows.map((r) => ({
@@ -524,8 +655,9 @@ router.get('/low-stock', async (req, res, next) => {
               p.stock_qty, p.min_stock, c.name AS category_name
        FROM products p
        LEFT JOIN categories c ON c.id = p.category_id
-       WHERE p.is_active = TRUE AND p.stock_qty <= p.min_stock
-       ORDER BY (p.stock_qty - p.min_stock), p.name`
+       WHERE p.business = $1 AND p.is_active = TRUE AND p.stock_qty <= p.min_stock
+       ORDER BY (p.stock_qty - p.min_stock), p.name`,
+      [req.business]
     );
 
     const rows = result.rows.map((r) => ({
@@ -558,8 +690,8 @@ router.get('/stock-card/:productId', async (req, res, next) => {
 
     const product = await pool.query(
       `SELECT p.id, p.sku, p.name, p.base_unit, p.stock_qty, p.min_stock, p.cost_price
-       FROM products p WHERE p.id = $1`,
-      [req.params.productId]
+       FROM products p WHERE p.id = $1 AND p.business = $2`,
+      [req.params.productId, req.business]
     );
     if (!product.rows[0]) return res.status(404).json({ error: 'Produk tidak ditemukan' });
 
@@ -568,9 +700,10 @@ router.get('/stock-card/:productId', async (req, res, next) => {
               sm.unit_cost, sm.note, u.full_name AS user_name
        FROM stock_movements sm
        LEFT JOIN users u ON u.id = sm.user_id
-       WHERE sm.product_id = $1 AND sm.created_at >= $2::date AND sm.created_at < ($3::date + INTERVAL '1 day')
+       WHERE sm.product_id = $1 AND sm.business = $4
+         AND sm.created_at >= $2::date AND sm.created_at < ($3::date + INTERVAL '1 day')
        ORDER BY sm.created_at ASC, sm.id ASC`,
-      [req.params.productId, from, to]
+      [req.params.productId, from, to, req.business]
     );
 
     const rows = result.rows.map((r) => ({
@@ -597,29 +730,137 @@ router.get('/stock-card/:productId', async (req, res, next) => {
 });
 
 // =========================================================
+// Dashboard gabungan lintas usaha (khusus owner: butuh report.view DAN
+// akses ke lebih dari satu usaha). Header X-Business tidak dipakai di sini.
+// =========================================================
+const summarizeBusiness = async (business) => {
+  const today = await pool.query(
+    `SELECT COALESCE(SUM(grand_total), 0)::bigint AS grand_total, COUNT(*)::int AS txn_count
+     FROM sales
+     WHERE business = $1 AND status = 'completed' AND created_at::date = CURRENT_DATE`,
+    [business]
+  );
+  const month = await pool.query(
+    `SELECT COALESCE(SUM(grand_total), 0)::bigint AS grand_total, COUNT(*)::int AS txn_count
+     FROM sales
+     WHERE business = $1 AND status = 'completed' AND created_at >= DATE_TRUNC('month', CURRENT_DATE)`,
+    [business]
+  );
+  const openShifts = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM shifts WHERE business = $1 AND closed_at IS NULL`,
+    [business]
+  );
+  const trend = await pool.query(
+    `SELECT created_at::date AS date, COALESCE(SUM(grand_total), 0)::bigint AS grand_total
+     FROM sales
+     WHERE business = $1 AND status = 'completed' AND created_at >= CURRENT_DATE - INTERVAL '6 days'
+     GROUP BY created_at::date ORDER BY created_at::date`,
+    [business]
+  );
+
+  return {
+    business,
+    today: {
+      grand_total: Number(today.rows[0].grand_total),
+      txn_count: today.rows[0].txn_count,
+    },
+    month: {
+      grand_total: Number(month.rows[0].grand_total),
+      txn_count: month.rows[0].txn_count,
+    },
+    open_shifts: openShifts.rows[0].n,
+    trend: trend.rows.map((r) => ({ date: toIso(r.date), grand_total: Number(r.grand_total) })),
+  };
+};
+
+router.get('/overview', requirePermission('report.view'), async (req, res, next) => {
+  try {
+    // Middleware resolveBusiness hanya mengizinkan req.business === 'all' untuk
+    // path ini; tolak bila header lain (mis. default minimarket) agar eksplisit.
+    if (req.business !== 'all') {
+      throw new HttpError(400, 'Ringkasan gabungan butuh header X-Business: all');
+    }
+    const businesses = ['minimarket', 'fotokopi'];
+    const perBusiness = await Promise.all(businesses.map((b) => summarizeBusiness(b)));
+
+    // Ringkasan fotokopi (antrian + pendapatan jasa hari ini).
+    const printToday = await pool.query(
+      `SELECT COUNT(*)::int AS order_count, COALESCE(SUM(grand_total), 0)::bigint AS grand_total
+       FROM print_orders
+       WHERE business = 'fotokopi' AND payment_status = 'paid' AND status <> 'cancelled'
+         AND created_at::date = CURRENT_DATE`,
+      []
+    );
+    const printQueue = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM print_orders
+       WHERE business = 'fotokopi' AND status IN ('queued', 'processing', 'ready')`,
+      []
+    );
+
+    const totals = perBusiness.reduce(
+      (acc, b) => ({
+        today_grand_total: acc.today_grand_total + b.today.grand_total,
+        today_txn_count: acc.today_txn_count + b.today.txn_count,
+        month_grand_total: acc.month_grand_total + b.month.grand_total,
+        month_txn_count: acc.month_txn_count + b.month.txn_count,
+      }),
+      { today_grand_total: 0, today_txn_count: 0, month_grand_total: 0, month_txn_count: 0 }
+    );
+
+    // Tren gabungan 7 hari: jumlahkan grand_total per tanggal dari kedua usaha.
+    const trendMap = new Map();
+    perBusiness.forEach((b) => {
+      b.trend.forEach((point) => {
+        trendMap.set(point.date, (trendMap.get(point.date) || 0) + point.grand_total);
+      });
+    });
+    const trend = [...trendMap.entries()]
+      .map(([date, grand_total]) => ({ date, grand_total }))
+      .sort((a, b) => (a.date < b.date ? -1 : 1));
+
+    res.json({
+      totals: { ...totals, print_queue: printQueue.rows[0].n },
+      businesses: perBusiness,
+      fotokopi: {
+        today_orders: printToday.rows[0].order_count,
+        today_revenue: Number(printToday.rows[0].grand_total),
+        active_queue: printQueue.rows[0].n,
+      },
+      trend,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// =========================================================
 // Dashboard KPI
 // =========================================================
 router.get('/dashboard', async (req, res, next) => {
   try {
+    const business = req.business;
     const today = await pool.query(
       `SELECT COUNT(*)::int AS txn_count,
               COALESCE(SUM(grand_total), 0)::bigint AS grand_total,
               COALESCE(SUM(tax_total), 0)::bigint AS tax_total
        FROM sales
-       WHERE status = 'completed' AND created_at::date = CURRENT_DATE`
+       WHERE business = $1 AND status = 'completed' AND created_at::date = CURRENT_DATE`,
+      [business]
     );
 
     const month = await pool.query(
       `SELECT COUNT(*)::int AS txn_count,
               COALESCE(SUM(grand_total), 0)::bigint AS grand_total
        FROM sales
-       WHERE status = 'completed' AND created_at >= DATE_TRUNC('month', CURRENT_DATE)`
+       WHERE business = $1 AND status = 'completed' AND created_at >= DATE_TRUNC('month', CURRENT_DATE)`,
+      [business]
     );
 
     const profitToday = await pool.query(
       `SELECT COALESCE(SUM(si.line_total - (si.cost_price * si.qty)), 0)::bigint AS gross_profit
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
-       WHERE s.status = 'completed' AND s.created_at::date = CURRENT_DATE`
+       WHERE s.business = $1 AND s.status = 'completed' AND s.created_at::date = CURRENT_DATE`,
+      [business]
     );
 
     // Retur hari ini (refund & HPP kembali) agar laba bersih konsisten dengan laporan.
@@ -627,22 +868,27 @@ router.get('/dashboard', async (req, res, next) => {
       `SELECT COALESCE(SUM(ri.refund_amount), 0)::bigint AS return_refund,
               ${RETURN_COGS_EXPR} AS return_cogs
        ${returnCogsJoin}
-       WHERE r.created_at >= CURRENT_DATE AND r.created_at < (CURRENT_DATE + INTERVAL '1 day')`
+       WHERE s.business = $1 AND r.created_at >= CURRENT_DATE AND r.created_at < (CURRENT_DATE + INTERVAL '1 day')`,
+      [business]
     );
 
     const expenseToday = await pool.query(
-      `SELECT COALESCE(SUM(amount), 0)::bigint AS expense FROM expenses WHERE date = CURRENT_DATE`
+      `SELECT COALESCE(SUM(amount), 0)::bigint AS expense FROM expenses
+       WHERE business = $1 AND date = CURRENT_DATE`,
+      [business]
     );
 
     const expenseMonth = await pool.query(
       `SELECT COALESCE(SUM(amount), 0)::bigint AS expense
-       FROM expenses WHERE date >= DATE_TRUNC('month', CURRENT_DATE)::date`
+       FROM expenses WHERE business = $1 AND date >= DATE_TRUNC('month', CURRENT_DATE)::date`,
+      [business]
     );
 
     const profitMonth = await pool.query(
       `SELECT ${GROSS_PROFIT_EXPR} AS gross_profit
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
-       WHERE s.status = 'completed' AND s.created_at >= DATE_TRUNC('month', CURRENT_DATE)`
+       WHERE s.business = $1 AND s.status = 'completed' AND s.created_at >= DATE_TRUNC('month', CURRENT_DATE)`,
+      [business]
     );
 
     // Retur bulan ini agar laba bersih bulanan konsisten dengan hari ini & laporan.
@@ -650,8 +896,9 @@ router.get('/dashboard', async (req, res, next) => {
       `SELECT COALESCE(SUM(ri.refund_amount), 0)::bigint AS return_refund,
               ${RETURN_COGS_EXPR} AS return_cogs
        ${returnCogsJoin}
-       WHERE r.created_at >= DATE_TRUNC('month', CURRENT_DATE)
-         AND r.created_at < (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month')`
+       WHERE s.business = $1 AND r.created_at >= DATE_TRUNC('month', CURRENT_DATE)
+         AND r.created_at < (DATE_TRUNC('month', CURRENT_DATE) + INTERVAL '1 month')`,
+      [business]
     );
 
     const topProducts = await pool.query(
@@ -659,23 +906,28 @@ router.get('/dashboard', async (req, res, next) => {
        FROM sale_items si
        JOIN sales s ON s.id = si.sale_id
        JOIN products p ON p.id = si.product_id
-       WHERE s.status = 'completed' AND s.created_at >= CURRENT_DATE - INTERVAL '30 days'
-       GROUP BY p.name ORDER BY qty_sold DESC LIMIT 5`
+       WHERE s.business = $1 AND s.status = 'completed' AND s.created_at >= CURRENT_DATE - INTERVAL '30 days'
+       GROUP BY p.name ORDER BY qty_sold DESC LIMIT 5`,
+      [business]
     );
 
     const lowStock = await pool.query(
-      `SELECT COUNT(*)::int AS n FROM products WHERE is_active = TRUE AND stock_qty <= min_stock`
+      `SELECT COUNT(*)::int AS n FROM products
+       WHERE business = $1 AND is_active = TRUE AND stock_qty <= min_stock`,
+      [business]
     );
 
     const openShifts = await pool.query(
-      `SELECT COUNT(*)::int AS n FROM shifts WHERE closed_at IS NULL`
+      `SELECT COUNT(*)::int AS n FROM shifts WHERE business = $1 AND closed_at IS NULL`,
+      [business]
     );
 
     const salesTrend = await pool.query(
       `SELECT created_at::date AS date, COALESCE(SUM(grand_total), 0)::bigint AS grand_total
        FROM sales
-       WHERE status = 'completed' AND created_at >= CURRENT_DATE - INTERVAL '6 days'
-       GROUP BY created_at::date ORDER BY created_at::date`
+       WHERE business = $1 AND status = 'completed' AND created_at >= CURRENT_DATE - INTERVAL '6 days'
+       GROUP BY created_at::date ORDER BY created_at::date`,
+      [business]
     );
 
     // Modal pembelian lunas (informatif). Kriteria & rentang sama dengan tab Laporan "Modal"
@@ -684,22 +936,22 @@ router.get('/dashboard', async (req, res, next) => {
     const purchasePaidMonth = await pool.query(
       `SELECT COALESCE(SUM(total), 0)::bigint AS amount, COUNT(*)::int AS po_count
        FROM purchases
-       WHERE payment_status = 'paid' AND status <> 'cancelled'
-         AND date >= DATE_TRUNC('month', (CURRENT_TIMESTAMP AT TIME ZONE $1))::date
-         AND date <= (CURRENT_TIMESTAMP AT TIME ZONE $1)::date`,
-      [APP_TIMEZONE]
+       WHERE business = $1 AND payment_status = 'paid' AND status <> 'cancelled'
+         AND date >= DATE_TRUNC('month', (CURRENT_TIMESTAMP AT TIME ZONE $2))::date
+         AND date <= (CURRENT_TIMESTAMP AT TIME ZONE $2)::date`,
+      [business, APP_TIMEZONE]
     );
 
     const purchasePaidToday = await pool.query(
       `SELECT COALESCE(SUM(total), 0)::bigint AS amount, COUNT(*)::int AS po_count
        FROM purchases
-       WHERE payment_status = 'paid' AND status <> 'cancelled'
-         AND date = (CURRENT_TIMESTAMP AT TIME ZONE $1)::date`,
-      [APP_TIMEZONE]
+       WHERE business = $1 AND payment_status = 'paid' AND status <> 'cancelled'
+         AND date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date`,
+      [business, APP_TIMEZONE]
     );
 
     // Piutang grosir: total belum lunas, jumlah invoice, dan yang lewat jatuh tempo.
-    const receivable = await getReceivableSummary();
+    const receivable = await getReceivableSummary(pool, business);
 
     res.json({
       today: {

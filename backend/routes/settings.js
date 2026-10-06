@@ -4,7 +4,7 @@ const path = require('path');
 const pool = require('../db');
 const { requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
-const { getSettings } = require('../utils/settings');
+const { getSettingsFor } = require('../utils/settings');
 const { imageUpload, uploadRoot, publicPath } = require('../utils/upload');
 const { logAudit } = require('../utils/audit');
 const { cleanString, toBool } = require('../utils/validate');
@@ -27,9 +27,9 @@ const INT_FIELDS = [
   'expiry_warning_days',
 ];
 
-router.get('/', async (_req, res, next) => {
+router.get('/', async (req, res, next) => {
   try {
-    res.json(await getSettings());
+    res.json(await getSettingsFor(req.business));
   } catch (err) {
     next(err);
   }
@@ -38,7 +38,9 @@ router.get('/', async (_req, res, next) => {
 router.put('/', requirePermission('settings.manage'), async (req, res, next) => {
   try {
     const body = req.body || {};
-    const current = await getSettings();
+    // Mode selain minimarket memakai tabel business_settings (per usaha).
+    const isBusiness = req.business !== 'minimarket';
+    const current = await getSettingsFor(req.business);
     if (!current) throw new HttpError(500, 'Pengaturan toko belum diinisialisasi');
 
     const updates = {};
@@ -62,19 +64,22 @@ router.put('/', requirePermission('settings.manage'), async (req, res, next) => 
     }
 
     if ('tax_included' in body) updates.tax_included = toBool(body.tax_included, true);
-    if ('allow_negative_stock' in body) {
+    if (!isBusiness && 'allow_negative_stock' in body) {
       updates.allow_negative_stock = toBool(body.allow_negative_stock, false);
     }
 
-    INT_FIELDS.forEach((field) => {
-      if (field in body) {
-        const value = Math.round(Number(body[field]));
-        if (!Number.isFinite(value) || value < 0) {
-          throw new HttpError(400, `Nilai ${field} tidak valid`);
+    // Setelan poin/stok/minimal hanya ada di store_settings (minimarket).
+    if (!isBusiness) {
+      INT_FIELDS.forEach((field) => {
+        if (field in body) {
+          const value = Math.round(Number(body[field]));
+          if (!Number.isFinite(value) || value < 0) {
+            throw new HttpError(400, `Nilai ${field} tidak valid`);
+          }
+          updates[field] = value;
         }
-        updates[field] = value;
-      }
-    });
+      });
+    }
 
     const keys = Object.keys(updates);
     if (keys.length === 0) return res.json(current);
@@ -82,18 +87,29 @@ router.put('/', requirePermission('settings.manage'), async (req, res, next) => 
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
     const values = keys.map((key) => updates[key]);
 
-    await pool.query(
-      `UPDATE store_settings SET ${setClause}, updated_at = NOW() WHERE id = 1`,
-      values
-    );
+    if (isBusiness) {
+      await pool.query(
+        'INSERT INTO business_settings (business) VALUES ($1) ON CONFLICT (business) DO NOTHING',
+        [req.business]
+      );
+      await pool.query(
+        `UPDATE business_settings SET ${setClause}, updated_at = NOW() WHERE business = $${keys.length + 1}`,
+        [...values, req.business]
+      );
+    } else {
+      await pool.query(
+        `UPDATE store_settings SET ${setClause}, updated_at = NOW() WHERE id = 1`,
+        values
+      );
+    }
     await logAudit(pool, {
       userId: req.user.id,
       action: 'update',
       entity: 'settings',
-      entityId: 1,
-      detail: updates,
+      entityId: isBusiness ? null : 1,
+      detail: { ...updates, business: req.business },
     });
-    res.json(await getSettings());
+    res.json(await getSettingsFor(req.business));
   } catch (err) {
     next(err);
   }
@@ -102,8 +118,9 @@ router.put('/', requirePermission('settings.manage'), async (req, res, next) => 
 router.post('/qris-image', requirePermission('settings.manage'), imageUpload.single('image'), async (req, res, next) => {
   try {
     if (!req.file) throw new HttpError(400, 'File gambar wajib diunggah');
+    const isBusiness = req.business !== 'minimarket';
 
-    const current = await getSettings();
+    const current = await getSettingsFor(req.business);
     if (current?.qris_image_path) {
       const oldName = path.basename(current.qris_image_path);
       const oldFile = path.join(uploadRoot, oldName);
@@ -111,15 +128,24 @@ router.post('/qris-image', requirePermission('settings.manage'), imageUpload.sin
     }
 
     const relative = publicPath(req.file.filename);
-    await pool.query('UPDATE store_settings SET qris_image_path = $1, updated_at = NOW() WHERE id = 1', [
-      relative,
-    ]);
+    if (isBusiness) {
+      await pool.query(
+        `INSERT INTO business_settings (business, qris_image_path, updated_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (business) DO UPDATE SET qris_image_path = $2, updated_at = NOW()`,
+        [req.business, relative]
+      );
+    } else {
+      await pool.query('UPDATE store_settings SET qris_image_path = $1, updated_at = NOW() WHERE id = 1', [
+        relative,
+      ]);
+    }
     await logAudit(pool, {
       userId: req.user.id,
       action: 'upload',
       entity: 'settings',
-      entityId: 1,
-      detail: { qris_image_path: relative },
+      entityId: isBusiness ? null : 1,
+      detail: { qris_image_path: relative, business: req.business },
     });
     res.json({ qris_image_path: relative });
   } catch (err) {

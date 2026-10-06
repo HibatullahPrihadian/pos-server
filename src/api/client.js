@@ -1,10 +1,24 @@
 // Fetch wrapper terpusat: menyisipkan JWT, menangani error, dan mengurai JSON.
 const TOKEN_KEY = 'pos_token';
+// Mode usaha aktif (minimarket/fotokopi). Dikirim sebagai header X-Business;
+// backend memakai 'minimarket' bila header tidak ada (kompatibel dengan klien lama).
+// Disimpan di sessionStorage: pilihan berlaku selama sesi tab (F5 tidak hilang),
+// sesi baru menampilkan pemilih mode lagi.
+const BUSINESS_KEY = 'pos_business';
+export const DEFAULT_BUSINESS = 'minimarket';
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY);
 export const setToken = (token) => {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+};
+
+export const getBusiness = () => sessionStorage.getItem(BUSINESS_KEY) || DEFAULT_BUSINESS;
+// Nilai mentah: null bila user belum memilih mode usaha pada sesi ini.
+export const peekBusiness = () => sessionStorage.getItem(BUSINESS_KEY);
+export const setStoredBusiness = (business) => {
+  if (business) sessionStorage.setItem(BUSINESS_KEY, business);
+  else sessionStorage.removeItem(BUSINESS_KEY);
 };
 
 export class ApiError extends Error {
@@ -38,6 +52,7 @@ export const request = async (method, path, { body, params, isForm, signal } = {
   const headers = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
+  headers['X-Business'] = getBusiness();
   if (!isForm && body !== undefined) headers['Content-Type'] = 'application/json';
 
   const res = await fetch(buildUrl(path, params), {
@@ -73,7 +88,10 @@ export const api = {
 export const downloadFile = async (path, filename, params) => {
   const token = getToken();
   const res = await fetch(buildUrl(path, params), {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      'X-Business': getBusiness(),
+    },
   });
   if (!res.ok) {
     const data = await parse(res);

@@ -72,8 +72,9 @@ router.get('/', async (req, res, next) => {
     const from = cleanString(req.query.from, 10);
     const to = cleanString(req.query.to, 10);
 
-    const conditions = [];
-    const params = [];
+    // Pembelian dipisah per usaha; tanpa header, default 'minimarket' = perilaku lama.
+    const conditions = ['pu.business = $1'];
+    const params = [req.business];
     if (status) {
       params.push(status);
       conditions.push(`pu.status = $${params.length}`);
@@ -107,7 +108,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const result = await pool.query(`${PO_SELECT} WHERE pu.id = $1`, [req.params.id]);
+    const result = await pool.query(`${PO_SELECT} WHERE pu.id = $1 AND pu.business = $2`, [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Pembelian tidak ditemukan');
 
     const items = await pool.query(
@@ -140,9 +141,9 @@ router.post('/', requirePermission('purchase.manage'), async (req, res, next) =>
       const code = await nextDocNumber(client, 'PO');
 
       const result = await client.query(
-        `INSERT INTO purchases (code, supplier_id, invoice_no, date, status, total, note, user_id)
-         VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE), $5, $6, $7, $8) RETURNING *`,
-        [code, supplierId, invoiceNo, date || null, status, total, note, req.user.id]
+        `INSERT INTO purchases (code, supplier_id, invoice_no, date, status, total, note, user_id, business)
+         VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE), $5, $6, $7, $8, $9) RETURNING *`,
+        [code, supplierId, invoiceNo, date || null, status, total, note, req.user.id, req.business]
       );
 
       for (const item of items) {
@@ -165,7 +166,7 @@ router.post('/', requirePermission('purchase.manage'), async (req, res, next) =>
 
 router.put('/:id', requirePermission('purchase.manage'), async (req, res, next) => {
   try {
-    const existing = await pool.query('SELECT * FROM purchases WHERE id = $1', [req.params.id]);
+    const existing = await pool.query('SELECT * FROM purchases WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!existing.rows[0]) throw new HttpError(404, 'Pembelian tidak ditemukan');
     if (!['draft', 'ordered'].includes(existing.rows[0].status)) {
       throw new HttpError(400, 'Hanya PO draft/ordered yang dapat diubah');
@@ -184,8 +185,8 @@ router.put('/:id', requirePermission('purchase.manage'), async (req, res, next) 
 
       await client.query(
         `UPDATE purchases SET supplier_id = $1, invoice_no = $2, date = COALESCE($3::date, date),
-           status = $4, total = $5, note = $6 WHERE id = $7`,
-        [supplierId, invoiceNo, date || null, status, total, note, req.params.id]
+           status = $4, total = $5, note = $6 WHERE id = $7 AND business = $8`,
+        [supplierId, invoiceNo, date || null, status, total, note, req.params.id, req.business]
       );
 
       await client.query('DELETE FROM purchase_items WHERE purchase_id = $1', [req.params.id]);
@@ -197,7 +198,7 @@ router.put('/:id', requirePermission('purchase.manage'), async (req, res, next) 
         );
       }
 
-      const result = await client.query('SELECT * FROM purchases WHERE id = $1', [req.params.id]);
+      const result = await client.query('SELECT * FROM purchases WHERE id = $1 AND business = $2', [req.params.id, req.business]);
       return result.rows[0];
     });
 
@@ -216,7 +217,7 @@ router.post('/:id/receive', requirePermission('purchase.manage'), async (req, re
     const allowNegative = settings?.allow_negative_stock === true;
 
     const result = await withTransaction(async (client) => {
-      const poResult = await client.query('SELECT * FROM purchases WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const poResult = await client.query('SELECT * FROM purchases WHERE id = $1 AND business = $2 FOR UPDATE', [req.params.id, req.business]);
       const po = poResult.rows[0];
       if (!po) throw new HttpError(404, 'Pembelian tidak ditemukan');
       if (po.status === 'cancelled') throw new HttpError(400, 'PO sudah dibatalkan');
@@ -288,6 +289,7 @@ router.post('/:id/receive', requirePermission('purchase.manage'), async (req, re
           unitCost: baseUnitCost,
           note: `Penerimaan ${po.code}`,
           userId: req.user.id,
+          business: req.business,
           allowNegative,
           newCostPrice: newCost,
         });
@@ -345,7 +347,7 @@ router.post('/:id/payment', requirePermission('purchase.pay'), async (req, res, 
     if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Jumlah bayar tidak valid');
 
     const result = await withTransaction(async (client) => {
-      const poResult = await client.query('SELECT * FROM purchases WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const poResult = await client.query('SELECT * FROM purchases WHERE id = $1 AND business = $2 FOR UPDATE', [req.params.id, req.business]);
       const po = poResult.rows[0];
       if (!po) throw new HttpError(404, 'Pembelian tidak ditemukan');
       if (po.status === 'cancelled') throw new HttpError(400, 'PO sudah dibatalkan');
@@ -377,8 +379,8 @@ router.post('/:id/cancel', requirePermission('purchase.manage'), async (req, res
   try {
     const result = await pool.query(
       `UPDATE purchases SET status = 'cancelled'
-       WHERE id = $1 AND status IN ('draft', 'ordered') RETURNING *`,
-      [req.params.id]
+       WHERE id = $1 AND business = $2 AND status IN ('draft', 'ordered') RETURNING *`,
+      [req.params.id, req.business]
     );
     if (!result.rows[0]) throw new HttpError(400, 'PO tidak dapat dibatalkan (sudah ada penerimaan)');
     await logAudit(pool, {

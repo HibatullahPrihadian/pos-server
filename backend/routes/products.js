@@ -88,7 +88,7 @@ const validateProductBody = (body, { partial = false } = {}) => {
   return { value };
 };
 
-router.get('/', async (req, res, next) => {
+router.get('/', requirePermission('product.view'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query);
     const search = cleanString(req.query.search, 100);
@@ -97,8 +97,9 @@ router.get('/', async (req, res, next) => {
     const lowStock = toBool(req.query.low_stock, false);
     const activeOnly = req.query.is_active === undefined ? true : toBool(req.query.is_active, true);
 
-    const conditions = [];
-    const params = [];
+    // Produk dipisah per usaha; tanpa header, default 'minimarket' = perilaku lama.
+    const conditions = ['p.business = $1'];
+    const params = [req.business];
 
     if (activeOnly) conditions.push('p.is_active = TRUE');
     if (search) {
@@ -137,7 +138,7 @@ router.get('/', async (req, res, next) => {
 });
 
 // Cari berdasarkan barcode: tabel multibarcode -> barcode produk -> barcode satuan.
-router.get('/barcode/:barcode', async (req, res, next) => {
+router.get('/barcode/:barcode', requirePermission('product.view'), async (req, res, next) => {
   try {
     const barcode = String(req.params.barcode || '').trim();
     if (!barcode) throw new HttpError(400, 'Barcode wajib diisi');
@@ -156,7 +157,7 @@ router.get('/barcode/:barcode', async (req, res, next) => {
     if (extraResult.rows[0]) {
       const extra = extraResult.rows[0];
       const productId = extra.unit_id ? extra.unit_product_id : extra.product_id;
-      const p = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1 AND p.is_active = TRUE`, [productId]);
+      const p = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1 AND p.is_active = TRUE AND p.business = $2`, [productId, req.business]);
       product = p.rows[0] || null;
       if (product && extra.unit_id) {
         const u = await pool.query('SELECT * FROM product_units WHERE id = $1', [extra.unit_id]);
@@ -167,8 +168,8 @@ router.get('/barcode/:barcode', async (req, res, next) => {
     // 2) Barcode utama produk.
     if (!product) {
       const productResult = await pool.query(
-        `${SELECT_PRODUCT} WHERE p.barcode = $1 AND p.is_active = TRUE`,
-        [barcode]
+        `${SELECT_PRODUCT} WHERE p.barcode = $1 AND p.is_active = TRUE AND p.business = $2`,
+        [barcode, req.business]
       );
       product = productResult.rows[0] || null;
     }
@@ -178,12 +179,12 @@ router.get('/barcode/:barcode', async (req, res, next) => {
       const unitResult = await pool.query(
         `SELECT pu.*, p.id AS product_id FROM product_units pu
          JOIN products p ON p.id = pu.product_id
-         WHERE pu.barcode = $1 AND p.is_active = TRUE`,
-        [barcode]
+         WHERE pu.barcode = $1 AND p.is_active = TRUE AND p.business = $2`,
+        [barcode, req.business]
       );
       if (unitResult.rows[0]) {
         matchedUnit = unitResult.rows[0];
-        const p = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1`, [matchedUnit.product_id]);
+        const p = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1 AND p.business = $2`, [matchedUnit.product_id, req.business]);
         product = p.rows[0];
       }
     }
@@ -215,7 +216,10 @@ router.post('/quote', async (req, res, next) => {
     // Validasi member di server (jangan percaya klien), sama seperti checkout.
     let memberId = toInt(req.body?.member_id, 0) || null;
     if (memberId) {
-      const member = await pool.query('SELECT id FROM members WHERE id = $1 AND is_active = TRUE', [memberId]);
+      const member = await pool.query(
+        'SELECT id FROM members WHERE id = $1 AND is_active = TRUE AND business = $2',
+        [memberId, req.business]
+      );
       if (!member.rows[0]) memberId = null;
     }
 
@@ -245,9 +249,9 @@ router.post('/quote', async (req, res, next) => {
   }
 });
 
-router.get('/export', async (req, res, next) => {
+router.get('/export', requirePermission('product.view'), async (req, res, next) => {
   try {
-    const result = await pool.query(`${SELECT_PRODUCT} ORDER BY p.name`);
+    const result = await pool.query(`${SELECT_PRODUCT} WHERE p.business = $1 ORDER BY p.name`, [req.business]);
     const rows = result.rows.map((p) => ({
       sku: p.sku,
       barcode: p.barcode || '',
@@ -271,9 +275,9 @@ router.get('/export', async (req, res, next) => {
   }
 });
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requirePermission('product.view'), async (req, res, next) => {
   try {
-    const result = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1`, [req.params.id]);
+    const result = await pool.query(`${SELECT_PRODUCT} WHERE p.id = $1 AND p.business = $2`, [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
     const units = await pool.query(
       'SELECT * FROM product_units WHERE product_id = $1 ORDER BY conversion_factor',
@@ -292,14 +296,14 @@ router.post('/', requirePermission('product.manage'), async (req, res, next) => 
 
     const result = await pool.query(
       `INSERT INTO products
-        (sku, barcode, name, category_id, supplier_id, base_unit, cost_price, sell_price, member_price, min_stock, is_consignment, consignor_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        (sku, barcode, name, category_id, supplier_id, base_unit, cost_price, sell_price, member_price, min_stock, is_consignment, consignor_id, business)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING *`,
       [
         value.sku, value.barcode || null, value.name, value.category_id || null,
         value.supplier_id || null, value.base_unit, value.cost_price ?? 0, value.sell_price,
         value.member_price ?? null, value.min_stock ?? 0, value.is_consignment ?? false,
-        value.consignor_id || null,
+        value.consignor_id || null, req.business,
       ]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'products', entityId: result.rows[0].id });
@@ -320,9 +324,10 @@ router.put('/:id', requirePermission('product.manage'), async (req, res, next) =
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
     const values = keys.map((key) => (key === 'barcode' || key === 'member_price' ? value[key] ?? null : value[key]));
 
-    values.push(req.params.id);
+    values.push(req.params.id, req.business);
     const result = await pool.query(
-      `UPDATE products SET ${setClause}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`,
+      `UPDATE products SET ${setClause}, updated_at = NOW()
+       WHERE id = $${values.length - 1} AND business = $${values.length} RETURNING *`,
       values
     );
     if (!result.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
@@ -337,8 +342,8 @@ router.put('/:id', requirePermission('product.manage'), async (req, res, next) =
 router.delete('/:id', requirePermission('product.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(
-      'UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING id',
-      [req.params.id]
+      'UPDATE products SET is_active = FALSE, updated_at = NOW() WHERE id = $1 AND business = $2 RETURNING id',
+      [req.params.id, req.business]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'deactivate', entity: 'products', entityId: Number(req.params.id) });
@@ -352,7 +357,10 @@ router.post('/:id/image', requirePermission('product.manage'), imageUpload.singl
   try {
     if (!req.file) throw new HttpError(400, 'File gambar wajib diunggah');
 
-    const current = await pool.query('SELECT image_path FROM products WHERE id = $1', [req.params.id]);
+    const current = await pool.query(
+      'SELECT image_path FROM products WHERE id = $1 AND business = $2',
+      [req.params.id, req.business]
+    );
     if (!current.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
 
     if (current.rows[0].image_path) {
@@ -362,8 +370,8 @@ router.post('/:id/image', requirePermission('product.manage'), imageUpload.singl
 
     const relative = publicPath(req.file.filename);
     const result = await pool.query(
-      'UPDATE products SET image_path = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
-      [relative, req.params.id]
+      'UPDATE products SET image_path = $1, updated_at = NOW() WHERE id = $2 AND business = $3 RETURNING *',
+      [relative, req.params.id, req.business]
     );
     res.json(result.rows[0]);
   } catch (err) {
@@ -389,8 +397,8 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
     const rows = parseCsv(text);
     if (rows.length === 0) throw new HttpError(400, 'CSV kosong atau tidak valid');
 
-    const categories = await pool.query('SELECT id, name FROM categories');
-    const suppliers = await pool.query('SELECT id, name FROM suppliers');
+    const categories = await pool.query('SELECT id, name FROM categories WHERE business = $1', [req.business]);
+    const suppliers = await pool.query('SELECT id, name FROM suppliers WHERE business = $1', [req.business]);
     const categoryMap = new Map(categories.rows.map((r) => [r.name.toLowerCase(), r.id]));
     const supplierMap = new Map(suppliers.rows.map((r) => [r.name.toLowerCase(), r.id]));
 
@@ -420,8 +428,8 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
         const key = categoryName.toLowerCase();
         if (!categoryMap.has(key)) {
           const inserted = await pool.query(
-            'INSERT INTO categories (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id',
-            [categoryName]
+            'INSERT INTO categories (name, business) VALUES ($1, $2) ON CONFLICT (business, name) DO UPDATE SET name = EXCLUDED.name RETURNING id',
+            [categoryName, req.business]
           );
           categoryMap.set(key, inserted.rows[0].id);
         }
@@ -433,7 +441,10 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
       if (supplierName) {
         const key = supplierName.toLowerCase();
         if (!supplierMap.has(key)) {
-          const inserted = await pool.query('INSERT INTO suppliers (name) VALUES ($1) RETURNING id', [supplierName]);
+          const inserted = await pool.query(
+            'INSERT INTO suppliers (name, business) VALUES ($1, $2) RETURNING id',
+            [supplierName, req.business]
+          );
           supplierMap.set(key, inserted.rows[0].id);
         }
         supplierId = supplierMap.get(key);
@@ -452,8 +463,8 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
       try {
         const result = await pool.query(
           `INSERT INTO products
-            (sku, barcode, name, category_id, supplier_id, base_unit, cost_price, sell_price, member_price, min_stock, stock_qty, is_active)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            (sku, barcode, name, category_id, supplier_id, base_unit, cost_price, sell_price, member_price, min_stock, stock_qty, is_active, business)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
            ON CONFLICT (sku) DO UPDATE SET
              barcode = EXCLUDED.barcode,
              name = EXCLUDED.name,
@@ -469,7 +480,7 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
            RETURNING id, sku, stock_qty`,
           [
             sku, barcode, name, categoryId, supplierId, baseUnit, costPrice,
-            sellPrice, memberPrice, minStock, stockQty, isActive,
+            sellPrice, memberPrice, minStock, stockQty, isActive, req.business,
           ]
         );
         imported.push({ line, id: result.rows[0].id, sku: result.rows[0].sku });
@@ -494,8 +505,9 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
 // =========================================================
 // Satuan produk
 // =========================================================
-router.get('/:id/units', async (req, res, next) => {
+router.get('/:id/units', requirePermission('product.view'), async (req, res, next) => {
   try {
+    await assertProductExists(req.params.id, req.business);
     const result = await pool.query(
       'SELECT * FROM product_units WHERE product_id = $1 ORDER BY conversion_factor',
       [req.params.id]
@@ -522,6 +534,8 @@ router.post('/:id/units', requirePermission('product.manage'), async (req, res, 
     const memberPrice = normalizeMoney(req.body?.member_price);
     const barcode = cleanString(req.body?.barcode, 50);
 
+    await assertProductExists(req.params.id, req.business);
+
     const result = await pool.query(
       `INSERT INTO product_units (product_id, unit_name, conversion_factor, sell_price, member_price, barcode)
        VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -535,6 +549,7 @@ router.post('/:id/units', requirePermission('product.manage'), async (req, res, 
 
 router.delete('/:id/units/:unitId', requirePermission('product.manage'), async (req, res, next) => {
   try {
+    await assertProductExists(req.params.id, req.business);
     const result = await pool.query(
       'DELETE FROM product_units WHERE id = $1 AND product_id = $2 RETURNING id',
       [req.params.unitId, req.params.id]
@@ -551,10 +566,13 @@ router.delete('/:id/units/:unitId', requirePermission('product.manage'), async (
 // =========================================================
 // Pastikan produk ada (dan aktif). Dipakai sebelum operasi nested barcode/tier
 // agar tidak bergantung pada error FK (yang muncul sebagai 500).
-const assertProductExists = async (productId) => {
+const assertProductExists = async (productId, business) => {
   const id = toInt(productId, 0);
   if (id <= 0) throw new HttpError(400, 'Produk tidak valid');
-  const result = await pool.query('SELECT id, is_active FROM products WHERE id = $1', [id]);
+  const result = await pool.query(
+    'SELECT id, is_active FROM products WHERE id = $1 AND business = $2',
+    [id, business]
+  );
   if (!result.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
   if (!result.rows[0].is_active) throw new HttpError(400, 'Produk tidak aktif');
   return result.rows[0];
@@ -577,9 +595,9 @@ const assertBarcodeAvailable = async (barcode, { exceptBarcodeId = null } = {}) 
   }
 };
 
-router.get('/:id/barcodes', async (req, res, next) => {
+router.get('/:id/barcodes', requirePermission('product.view'), async (req, res, next) => {
   try {
-    await assertProductExists(req.params.id);
+    await assertProductExists(req.params.id, req.business);
     const result = await pool.query(
       `SELECT pb.id, pb.barcode, pb.unit_id, pu.unit_name, pb.created_at
        FROM product_barcodes pb
@@ -601,7 +619,7 @@ router.post('/:id/barcodes', requirePermission('product.manage'), async (req, re
 
     const productId = toInt(req.params.id, 0);
     if (productId <= 0) throw new HttpError(400, 'Produk tidak valid');
-    await assertProductExists(productId);
+    await assertProductExists(productId, req.business);
 
     let unitId = toInt(req.body?.unit_id, 0) || null;
     if (unitId) {
@@ -632,7 +650,7 @@ router.post('/:id/barcodes', requirePermission('product.manage'), async (req, re
 
 router.delete('/:id/barcodes/:barcodeId', requirePermission('product.manage'), async (req, res, next) => {
   try {
-    await assertProductExists(req.params.id);
+    await assertProductExists(req.params.id, req.business);
     const result = await pool.query(
       'DELETE FROM product_barcodes WHERE id = $1 AND product_id = $2 RETURNING id',
       [req.params.barcodeId, req.params.id]
@@ -650,9 +668,9 @@ router.delete('/:id/barcodes/:barcodeId', requirePermission('product.manage'), a
 // =========================================================
 // Harga partai bertingkat (price_tiers)
 // =========================================================
-router.get('/:id/tiers', async (req, res, next) => {
+router.get('/:id/tiers', requirePermission('product.view'), async (req, res, next) => {
   try {
-    await assertProductExists(req.params.id);
+    await assertProductExists(req.params.id, req.business);
     const result = await pool.query(
       `SELECT pt.id, pt.unit_id, pu.unit_name, pt.min_qty, pt.price, pt.created_at
        FROM price_tiers pt
@@ -671,7 +689,7 @@ router.post('/:id/tiers', requirePermission('product.manage'), async (req, res, 
   try {
     const productId = toInt(req.params.id, 0);
     if (productId <= 0) throw new HttpError(400, 'Produk tidak valid');
-    await assertProductExists(productId);
+    await assertProductExists(productId, req.business);
 
     const minQty = Math.round(Number(req.body?.min_qty));
     if (!Number.isFinite(minQty) || minQty <= 1) {
@@ -710,7 +728,7 @@ router.post('/:id/tiers', requirePermission('product.manage'), async (req, res, 
 
 router.delete('/:id/tiers/:tierId', requirePermission('product.manage'), async (req, res, next) => {
   try {
-    await assertProductExists(req.params.id);
+    await assertProductExists(req.params.id, req.business);
     const result = await pool.query(
       'DELETE FROM price_tiers WHERE id = $1 AND product_id = $2 RETURNING id',
       [req.params.tierId, req.params.id]

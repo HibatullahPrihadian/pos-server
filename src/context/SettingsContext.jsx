@@ -1,17 +1,22 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { api } from '../api/client';
 import { useAuth } from './AuthContext';
+import { useBusiness } from './BusinessContext';
 
 const SettingsContext = createContext(null);
 
 // Pengaturan toko dipakai banyak halaman (struk, kasir, laporan).
+// Dimuat ulang saat mode usaha berganti karena tiap usaha punya setelan sendiri.
 export const SettingsProvider = ({ children }) => {
   const { user } = useAuth();
+  const { business } = useBusiness();
   const [settings, setSettings] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
-    if (!user) return;
+    // Tunggu mode usaha final agar setelan yang dimuat sesuai usaha aktif.
+    // Mode 'all' (ringkasan owner) tidak memuat setelan usaha.
+    if (!user || !business || business === 'all') return;
     setLoading(true);
     try {
       const data = await api.get('/api/settings');
@@ -21,7 +26,7 @@ export const SettingsProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, business]);
 
   useEffect(() => {
     load();

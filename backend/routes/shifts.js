@@ -66,8 +66,9 @@ const buildSummary = async (runner, shift) => {
 router.get('/current', async (req, res, next) => {
   try {
     const result = await pool.query(
-      `SELECT * FROM shifts WHERE user_id = $1 AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1`,
-      [req.user.id]
+      `SELECT * FROM shifts WHERE user_id = $1 AND business = $2 AND closed_at IS NULL
+       ORDER BY opened_at DESC LIMIT 1`,
+      [req.user.id, req.business]
     );
     if (!result.rows[0]) return res.json({ shift: null });
 
@@ -85,14 +86,14 @@ router.post('/open', requirePermission('shift.use'), async (req, res, next) => {
 
     const result = await withTransaction(async (client) => {
       const existing = await client.query(
-        'SELECT id FROM shifts WHERE user_id = $1 AND closed_at IS NULL FOR UPDATE',
-        [req.user.id]
+        'SELECT id FROM shifts WHERE user_id = $1 AND business = $2 AND closed_at IS NULL FOR UPDATE',
+        [req.user.id, req.business]
       );
       if (existing.rows[0]) throw new HttpError(400, 'Anda masih memiliki shift terbuka');
 
       const inserted = await client.query(
-        `INSERT INTO shifts (user_id, opening_cash, note) VALUES ($1, $2, $3) RETURNING *`,
-        [req.user.id, openingCash, note]
+        `INSERT INTO shifts (user_id, opening_cash, note, business) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [req.user.id, openingCash, note, req.business]
       );
       return inserted.rows[0];
     });
@@ -112,14 +113,16 @@ router.post('/close', requirePermission('shift.use'), async (req, res, next) => 
 
     const closed = await withTransaction(async (client) => {
       const result = shiftId
-        ? await client.query('SELECT * FROM shifts WHERE id = $1 FOR UPDATE', [shiftId])
+        ? await client.query('SELECT * FROM shifts WHERE id = $1 AND business = $2 FOR UPDATE', [shiftId, req.business])
         : await client.query(
-            'SELECT * FROM shifts WHERE user_id = $1 AND closed_at IS NULL ORDER BY opened_at DESC LIMIT 1 FOR UPDATE',
-            [req.user.id]
+            `SELECT * FROM shifts WHERE user_id = $1 AND business = $2 AND closed_at IS NULL
+             ORDER BY opened_at DESC LIMIT 1 FOR UPDATE`,
+            [req.user.id, req.business]
           );
 
       const shift = result.rows[0];
       if (!shift) throw new HttpError(404, 'Shift terbuka tidak ditemukan');
+      if (shift.business !== req.business) throw new HttpError(400, 'Shift bukan milik usaha ini');
       if (shift.closed_at) throw new HttpError(400, 'Shift sudah ditutup');
       if (!req.user.is_admin && shift.user_id !== req.user.id) {
         throw new HttpError(403, 'Shift ini bukan milik Anda');
@@ -158,8 +161,8 @@ router.get('/', async (req, res, next) => {
     const to = cleanString(req.query.to, 10);
     const userId = toInt(req.query.user_id, 0);
 
-    const conditions = [];
-    const params = [];
+    const conditions = ['sh.business = $1'];
+    const params = [req.business];
     if (from && isValidDate(from)) {
       params.push(from);
       conditions.push(`sh.opened_at >= $${params.length}::date`);
@@ -193,8 +196,8 @@ router.get('/:id/summary', async (req, res, next) => {
   try {
     const result = await pool.query(
       `SELECT sh.*, u.full_name AS user_name FROM shifts sh
-       LEFT JOIN users u ON u.id = sh.user_id WHERE sh.id = $1`,
-      [req.params.id]
+       LEFT JOIN users u ON u.id = sh.user_id WHERE sh.id = $1 AND sh.business = $2`,
+      [req.params.id, req.business]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Shift tidak ditemukan');
     const summary = await buildSummary(pool, result.rows[0]);

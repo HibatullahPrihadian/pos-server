@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
-const { signToken, verifyJwt } = require('../middleware/auth');
+const { signToken, verifyJwt, availableBusinesses } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { requireString } = require('../utils/validate');
 const { resolvePermissions } = require('../utils/permissions');
@@ -34,6 +34,8 @@ router.post('/login', async (req, res, next) => {
         role: user.role,
         permissions: resolvePermissions(user),
         is_admin: user.role === 'admin',
+        business: user.business || null,
+        available_businesses: availableBusinesses(user),
       },
     });
   } catch (err) {
@@ -44,7 +46,7 @@ router.post('/login', async (req, res, next) => {
 router.get('/me', verifyJwt, async (req, res, next) => {
   try {
     const result = await pool.query(
-      'SELECT id, username, full_name, role, is_active, permissions, created_at FROM users WHERE id = $1',
+      'SELECT id, username, full_name, role, is_active, permissions, business, created_at FROM users WHERE id = $1',
       [req.user.id]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Pengguna tidak ditemukan');
@@ -53,6 +55,7 @@ router.get('/me', verifyJwt, async (req, res, next) => {
       ...user,
       permissions: resolvePermissions(user),
       is_admin: user.role === 'admin',
+      available_businesses: availableBusinesses(user),
     });
   } catch (err) {
     next(err);

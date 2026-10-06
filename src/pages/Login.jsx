@@ -22,16 +22,30 @@ const Login = () => {
     try {
       const loggedIn = await login(username.trim(), password);
       // Dashboard butuh `report.view`; role lain diarahkan ke POS (atau stock
-      // bila POS tidak tersedia).
+      // bila POS tidak tersedia). Staf yang terikat mode fotokopi langsung ke
+      // antrian pesanan; owner (lebih dari satu usaha) ke pemilih mode.
       const perms = loggedIn.permissions || [];
       const isAdmin = loggedIn.role === 'admin' || loggedIn.is_admin;
-      const target = isAdmin || perms.includes('report.view')
-        ? '/'
-        : perms.includes('pos.use')
-          ? '/pos'
-          : perms.includes('stock.view')
-            ? '/stock'
+      const available = loggedIn.available_businesses || [];
+      let target;
+      if (available.length > 1) {
+        // Owner lintas usaha: langsung ke ringkasan gabungan (mode 'all').
+        target = isAdmin || perms.includes('report.view') ? '/overview' : '/';
+      } else if (loggedIn.business === 'fotokopi') {
+        target = perms.includes('print.use') || isAdmin
+          ? '/print-orders'
+          : perms.includes('shift.use')
+            ? '/shifts'
             : '/attendance';
+      } else {
+        target = isAdmin || perms.includes('report.view')
+          ? '/'
+          : perms.includes('pos.use')
+            ? '/pos'
+            : perms.includes('stock.view')
+              ? '/stock'
+              : '/attendance';
+      }
       navigate(target, { replace: true });
     } catch (err) {
       setError(err.message);

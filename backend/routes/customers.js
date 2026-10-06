@@ -36,14 +36,16 @@ const parseTermDays = (value) => {
   return n;
 };
 
-router.get('/', requirePermission('invoice.manage', 'invoice.view', 'customer.manage'), async (req, res, next) => {
+// print.use ikut diizinkan: form pesanan fotokopi memilih pelanggan dari master.
+router.get('/', requirePermission('invoice.manage', 'invoice.view', 'customer.manage', 'print.use'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
     const search = cleanString(req.query.search, 150);
     const activeOnly = req.query.is_active === undefined ? false : toBool(req.query.is_active, false);
 
-    const conditions = [];
-    const params = [];
+    // Pisahkan pelanggan per usaha; tanpa header, default 'minimarket' = perilaku lama.
+    const conditions = ['business = $1'];
+    const params = [req.business];
     if (activeOnly) conditions.push('is_active = TRUE');
     if (search) {
       params.push(`%${search.toLowerCase()}%`);
@@ -80,7 +82,7 @@ router.get('/', requirePermission('invoice.manage', 'invoice.view', 'customer.ma
 
 router.get('/:id', requirePermission('invoice.manage', 'invoice.view', 'customer.manage'), async (req, res, next) => {
   try {
-    const result = await pool.query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
+    const result = await pool.query('SELECT * FROM customers WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Pelanggan tidak ditemukan');
     res.json(result.rows[0]);
   } catch (err) {
@@ -93,7 +95,7 @@ router.get('/:id/statement', requirePermission('invoice.manage', 'invoice.view')
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
 
-    const customerResult = await pool.query('SELECT * FROM customers WHERE id = $1', [req.params.id]);
+    const customerResult = await pool.query('SELECT * FROM customers WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     const customer = customerResult.rows[0];
     if (!customer) throw new HttpError(404, 'Pelanggan tidak ditemukan');
 
@@ -101,15 +103,15 @@ router.get('/:id/statement', requirePermission('invoice.manage', 'invoice.view')
     const totalResult = await pool.query(
       `SELECT COALESCE(SUM(grand_total - paid_amount), 0)::bigint AS outstanding_total
        FROM sales
-       WHERE customer_id = $1 AND is_credit = TRUE AND status = 'completed' AND payment_status <> 'paid'`,
-      [req.params.id]
+       WHERE customer_id = $1 AND business = $2 AND is_credit = TRUE AND status = 'completed' AND payment_status <> 'paid'`,
+      [req.params.id, req.business]
     );
 
     const countResult = await pool.query(
       `SELECT COUNT(*)::int AS total
        FROM sales
-       WHERE customer_id = $1 AND is_credit = TRUE AND status = 'completed'`,
-      [req.params.id]
+       WHERE customer_id = $1 AND business = $2 AND is_credit = TRUE AND status = 'completed'`,
+      [req.params.id, req.business]
     );
 
     const invoices = await pool.query(
@@ -117,10 +119,10 @@ router.get('/:id/statement', requirePermission('invoice.manage', 'invoice.view')
               (grand_total - paid_amount)::bigint AS outstanding,
               (payment_status <> 'paid' AND due_date IS NOT NULL AND due_date < ${TODAY_SQL}) AS is_overdue
        FROM sales
-       WHERE customer_id = $1 AND is_credit = TRUE AND status = 'completed'
+       WHERE customer_id = $1 AND business = $2 AND is_credit = TRUE AND status = 'completed'
        ORDER BY created_at DESC, id DESC
-       LIMIT $2 OFFSET $3`,
-      [req.params.id, limit, offset]
+       LIMIT $3 OFFSET $4`,
+      [req.params.id, req.business, limit, offset]
     );
 
     const rows = invoices.rows.map((r) => ({
@@ -157,12 +159,12 @@ router.post('/', requirePermission('customer.manage'), async (req, res, next) =>
 
     const result = await pool.query(
       `INSERT INTO customers
-        (code, name, contact_name, phone, email, address, npwp, payment_term_days, credit_limit)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+        (code, name, contact_name, phone, email, address, npwp, payment_term_days, credit_limit, business)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [
         code, name.value, cleanString(req.body?.contact_name, 150), cleanString(req.body?.phone, 50),
         cleanString(req.body?.email, 120), cleanString(req.body?.address, 1000), cleanString(req.body?.npwp, 50),
-        termDays, creditLimit,
+        termDays, creditLimit, req.business,
       ]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'customers', entityId: result.rows[0].id });
@@ -189,11 +191,11 @@ router.put('/:id', requirePermission('customer.manage'), async (req, res, next) 
       `UPDATE customers SET
          name = $1, contact_name = $2, phone = $3, email = $4, address = $5, npwp = $6,
          payment_term_days = $7, credit_limit = $8, is_active = COALESCE($9::boolean, is_active)
-       WHERE id = $10 RETURNING *`,
+       WHERE id = $10 AND business = $11 RETURNING *`,
       [
         name.value, cleanString(req.body?.contact_name, 150), cleanString(req.body?.phone, 50),
         cleanString(req.body?.email, 120), cleanString(req.body?.address, 1000), cleanString(req.body?.npwp, 50),
-        termDays, creditLimit, isActive, req.params.id,
+        termDays, creditLimit, isActive, req.params.id, req.business,
       ]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Pelanggan tidak ditemukan');
@@ -207,8 +209,8 @@ router.put('/:id', requirePermission('customer.manage'), async (req, res, next) 
 router.delete('/:id', requirePermission('customer.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(
-      'UPDATE customers SET is_active = FALSE WHERE id = $1 RETURNING id',
-      [req.params.id]
+      'UPDATE customers SET is_active = FALSE WHERE id = $1 AND business = $2 RETURNING id',
+      [req.params.id, req.business]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Pelanggan tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'deactivate', entity: 'customers', entityId: Number(req.params.id) });

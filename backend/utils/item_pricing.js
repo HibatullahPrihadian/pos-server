@@ -2,7 +2,7 @@
 // (menghindari N+1). Dipakai bersama oleh checkout (sales.js) dan pratinjau
 // tampilan POS (/products/quote) agar hasilnya identik dan tidak menyimpang.
 
-const { resolveUnit, resolvePrice, resolveTierPricesForProducts, pickTierForLine, resolveEffectivePrice } = require('./pricing');
+const { resolvePrice, resolveTierPricesForProducts, pickTierForLine, resolveEffectivePrice } = require('./pricing');
 const { findPromotionsForProducts, promoMatchesLine, resolveBestPromo } = require('./promotions');
 
 // items: [{ product_id, unit_id, qty }]
@@ -24,6 +24,27 @@ const resolveItemsEffectivePricing = async (client, { items, isMember }) => {
 
   const categoryIds = [...new Set(productsResult.rows.map((p) => p.category_id).filter(Boolean))];
 
+  // Batch resolusi satuan: satu query untuk semua (product_id, unit_id) yang
+  // diminta, menghindari N+1 seperti pada resolveUnit per baris.
+  const unitKeys = normalized.filter((l) => l.unitId && productMap.has(l.productId));
+  const unitMap = new Map();
+  if (unitKeys.length > 0) {
+    const pairs = unitKeys.map((l) => [l.productId, l.unitId]);
+    const ids = [...new Set(pairs.map((p) => p[1]))];
+    const unitsResult = await client.query(
+      `SELECT * FROM product_units
+       WHERE id = ANY($1::int[]) AND product_id = ANY($2::int[])`,
+      [ids, [...new Set(pairs.map((p) => p[0]))]]
+    );
+    unitsResult.rows.forEach((u) => unitMap.set(`${u.product_id}:${u.id}`, u));
+  }
+  const resolveUnitRow = (productId, unitId) => {
+    if (!unitId) return { unit: null, conversionFactor: 1 };
+    const unit = unitMap.get(`${productId}:${unitId}`);
+    if (!unit) return null;
+    return { unit, conversionFactor: unit.conversion_factor };
+  };
+
   const [tierMap, promos] = await Promise.all([
     resolveTierPricesForProducts(client, { productIds }),
     findPromotionsForProducts(client, { productIds, categoryIds }),
@@ -37,7 +58,7 @@ const resolveItemsEffectivePricing = async (client, { items, isMember }) => {
       continue;
     }
 
-    const resolved = await resolveUnit(client, { productId: line.productId, unitId: line.unitId });
+    const resolved = resolveUnitRow(line.productId, line.unitId);
     if (!resolved) {
       results.push({ ...line, product, unit: null, unitMissing: true });
       continue;

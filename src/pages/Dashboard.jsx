@@ -7,11 +7,12 @@ import {
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import { useBusiness } from '../context/BusinessContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Spinner from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
-import { formatCurrency, formatDate } from '../utils/formatters';
+import { formatCurrency, formatDate, todayIso } from '../utils/formatters';
 
 const KPI = ({ icon: Icon, label, value, sub, tone = 'blue', to }) => {
   const tones = {
@@ -51,7 +52,135 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue', to }) => {
   );
 };
 
-const Dashboard = () => {
+// Dashboard mode fotokopi: fokus pada antrian pesanan & pendapatan jasa.
+// Data stok/piutang minimarket sengaja tidak ditampilkan (bukan milik usaha ini).
+const PrintDashboard = () => {
+  const toast = useToastContext();
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const to = todayIso();
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    const from = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    Promise.all([
+      api.get('/api/reports/print-summary', { from, to }),
+      api.get('/api/reports/print-queue-stats', { from: to, to }),
+      api.get('/api/reports/dashboard').catch(() => null),
+    ])
+      .then(([summary, queue, dash]) => setData({ summary, queue, dash, today: to }))
+      .catch((err) => toast.error(err.message))
+      .finally(() => setLoading(false));
+  }, [toast]);
+
+  if (loading) return <Spinner label="Memuat dashboard fotokopi..." />;
+  if (!data) return null;
+
+  const todayRow = (data.summary?.rows || []).find((r) => r.date === data.today)
+    || { order_count: 0, grand_total: 0, tax_total: 0 };
+  const activeQueue = (data.queue?.by_status?.queued || 0)
+    + (data.queue?.by_status?.processing || 0)
+    + (data.queue?.by_status?.ready || 0);
+  const maxTrend = Math.max(...(data.summary?.rows || []).map((t) => t.grand_total), 1);
+
+  return (
+    <div>
+      <PageHeader title="Dashboard Fotokopi" subtitle="Ringkasan pesanan & pendapatan jasa" />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+        <KPI
+          icon={Wallet}
+          label="Pendapatan Hari Ini"
+          value={formatCurrency(todayRow.grand_total)}
+          sub={`PPN ${formatCurrency(todayRow.tax_total)}`}
+          tone="green"
+          to="/print-reports"
+        />
+        <KPI
+          icon={Receipt}
+          label="Pesanan Hari Ini"
+          value={todayRow.order_count}
+          sub={`${data.queue?.paid ?? 0} lunas hari ini`}
+          tone="blue"
+          to="/print-orders"
+        />
+        <KPI
+          icon={Clock}
+          label="Antrian Aktif"
+          value={activeQueue}
+          sub="antre / diproses / siap"
+          tone={activeQueue > 0 ? 'orange' : 'green'}
+          to="/print-orders"
+        />
+        <KPI
+          icon={CalendarClock}
+          label="Shift Terbuka"
+          value={data.dash?.open_shifts ?? 0}
+          sub="shift usaha ini"
+          tone="purple"
+          to="/shifts"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card title="Pendapatan 7 Hari" className="lg:col-span-2">
+          {!data.summary?.rows?.length ? (
+            <p className="text-sm text-slate-500 py-8 text-center">Belum ada penjualan jasa</p>
+          ) : (
+            <div className="flex items-end gap-2 h-48">
+              {data.summary.rows.slice().reverse().map((item) => (
+                <div key={item.date} className="flex-1 flex flex-col items-center gap-2">
+                  <div className="text-xs text-slate-400">{formatCurrency(item.grand_total).replace('Rp', '')}</div>
+                  <div
+                    className="w-full bg-gradient-to-t from-ios-purple to-ios-blue rounded-t"
+                    style={{ height: `${Math.max(4, (item.grand_total / maxTrend) * 140)}px` }}
+                  />
+                  <div className="text-xs text-slate-500">{item.date.slice(8)}/{item.date.slice(5, 7)}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <div className="space-y-5">
+          <Card title="Status Antrian Hari Ini">
+            <div className="space-y-2 text-sm">
+              {[['queued', 'Antre'], ['processing', 'Diproses'], ['ready', 'Siap Diambil'], ['picked_up', 'Diambil']].map(([key, label]) => (
+                <div key={key} className="flex items-center justify-between">
+                  <span className="text-slate-300">{label}</span>
+                  <Badge tone={key === 'queued' ? 'orange' : key === 'ready' ? 'green' : 'blue'}>
+                    {data.queue?.by_status?.[key] ?? 0}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card title="Pintasan">
+            <div className="space-y-2">
+              <Link to="/print-orders/new" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
+                <span className="text-white text-sm flex items-center gap-2"><Receipt size={16} /> Buat Pesanan</span>
+                <ArrowRight size={16} className="text-slate-400" />
+              </Link>
+              <Link to="/print-orders" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
+                <span className="text-white text-sm flex items-center gap-2"><Clock size={16} /> Buka Antrian</span>
+                <ArrowRight size={16} className="text-slate-400" />
+              </Link>
+              <Link to="/print-reports" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
+                <span className="text-white text-sm flex items-center gap-2"><TrendingUp size={16} /> Lihat Laporan</span>
+                <ArrowRight size={16} className="text-slate-400" />
+              </Link>
+            </div>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MinimarketDashboard = () => {
   const toast = useToastContext();
   const { can } = useAuth();
   const [data, setData] = useState(null);
@@ -256,6 +385,12 @@ const Dashboard = () => {
       </div>
     </div>
   );
+};
+
+// Route "/" dipakai kedua mode: isi dashboard menyesuaikan mode usaha aktif.
+const Dashboard = () => {
+  const { business } = useBusiness();
+  return business === 'fotokopi' ? <PrintDashboard /> : <MinimarketDashboard />;
 };
 
 export default Dashboard;

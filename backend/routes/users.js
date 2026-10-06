@@ -2,7 +2,7 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const pool = require('../db');
 const { withTransaction } = require('../db');
-const { requirePermission } = require('../middleware/auth');
+const { requirePermission, BUSINESSES } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
 const { requireString, toBool } = require('../utils/validate');
 const { logAudit } = require('../utils/audit');
@@ -19,9 +19,18 @@ const router = express.Router();
 
 router.use(requirePermission('user.manage'));
 
-const PUBLIC_FIELDS = 'id, username, full_name, role, is_active, permissions, created_at';
+const PUBLIC_FIELDS = 'id, username, full_name, role, is_active, permissions, business, created_at';
 
 const normalizeRole = (value) => (VALID_ROLES.has(value) ? value : null);
+
+// Usaha yang boleh ditetapkan: null = lintas usaha (owner/admin), atau satu
+// usaha aktif. `undefined` berarti field tidak dikirim (tidak diubah).
+const normalizeBusiness = (value) => {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  if (BUSINESSES.includes(value)) return value;
+  throw new HttpError(400, 'Usaha tidak valid');
+};
 
 // Daftar izin + preset untuk membangun UI checkbox di halaman Pengguna.
 router.get('/permissions', (_req, res) => {
@@ -63,13 +72,14 @@ router.post('/', async (req, res, next) => {
       throw new HttpError(403, 'Hanya administrator yang dapat membuat akun admin');
     }
     const permissions = sanitizePermissions(req.body?.permissions);
+    const business = normalizeBusiness(req.body?.business) ?? null;
 
     const hash = await bcrypt.hash(password, 10);
 
     const result = await pool.query(
-      `INSERT INTO users (username, full_name, password_hash, role, permissions)
-       VALUES ($1, $2, $3, $4, $5) RETURNING ${PUBLIC_FIELDS}`,
-      [username.value, fullName.value, hash, role, permissions ? JSON.stringify(permissions) : null]
+      `INSERT INTO users (username, full_name, password_hash, role, permissions, business)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${PUBLIC_FIELDS}`,
+      [username.value, fullName.value, hash, role, permissions ? JSON.stringify(permissions) : null, business]
     );
     await logAudit(pool, {
       userId: req.user.id,
@@ -120,11 +130,19 @@ router.put('/:id', async (req, res, next) => {
     const hasPermissionsField = Object.prototype.hasOwnProperty.call(req.body || {}, 'permissions');
     const permissions = hasPermissionsField ? sanitizePermissions(req.body.permissions) : undefined;
 
+    // business: undefined -> tidak diubah; null -> lintas usaha; nilai -> terikat satu usaha.
+    const hasBusinessField = Object.prototype.hasOwnProperty.call(req.body || {}, 'business');
+    const business = hasBusinessField ? normalizeBusiness(req.body.business) : undefined;
+
     const fields = [fullName.value, role, finalActive];
     let query = 'UPDATE users SET full_name = $1, role = $2, is_active = $3';
     if (hasPermissionsField) {
       fields.push(permissions ? JSON.stringify(permissions) : null);
       query += `, permissions = $${fields.length}`;
+    }
+    if (hasBusinessField) {
+      fields.push(business ?? null);
+      query += `, business = $${fields.length}`;
     }
 
     if (typeof req.body?.password === 'string' && req.body.password) {

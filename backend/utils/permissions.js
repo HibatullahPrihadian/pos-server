@@ -27,6 +27,9 @@ const PERMISSIONS = [
   'invoice.view',
   'invoice.manage',
   'expense.manage',
+  'print.use',
+  'print.manage',
+  'print.report',
   'report.view',
   'user.manage',
   'settings.manage',
@@ -53,6 +56,9 @@ const PERMISSION_LABELS = {
   'invoice.view': 'Lihat piutang & invoice grosir',
   'invoice.manage': 'Terbitkan invoice kredit & catat pembayaran',
   'expense.manage': 'Kelola beban operasional',
+  'print.use': 'Buat & proses pesanan fotokopi',
+  'print.manage': 'Kelola master jasa fotokopi',
+  'print.report': 'Lihat laporan fotokopi',
   'report.view': 'Lihat laporan',
   'user.manage': 'Kelola pengguna',
   'settings.manage': 'Kelola pengaturan',
@@ -70,6 +76,8 @@ const ROLE_PRESETS = {
     // Kasir boleh MELIHAT piutang, tapi tidak boleh menerbitkan kredit/mencatat
     // pembayaran (invoice.manage) — keputusan pemilik/admin.
     'invoice.view',
+    // Mode fotokopi: kasir merangkap operator (buat/proses pesanan), bukan admin jasa.
+    'print.use',
   ],
   // Gudang: boleh jualan di POS (pos.use/shift.use), kelola produk & stok,
   // buat/terima PO. TIDAK boleh bayar ke supplier, kelola supplier/konsinyasi/
@@ -84,6 +92,15 @@ const ROLE_PRESETS = {
     'stock.manage',
     'purchase.view',
     'purchase.manage',
+  ],
+  // Operator fotokopi: hanya modul fotokopi + shift & absensi. Tidak bisa
+  // menyentuh POS/stok/inventori minimarket.
+  operator: [
+    'print.use',
+    'print.report',
+    'report.view',
+    'attendance.self',
+    'shift.use',
   ],
 };
 

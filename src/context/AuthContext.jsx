@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { api, getToken, setToken } from '../api/client';
+import { api, getToken, setToken, setStoredBusiness } from '../api/client';
 
 const AuthContext = createContext();
 
@@ -9,6 +9,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = useCallback(() => {
     setToken(null);
+    setStoredBusiness(null);
     setUser(null);
   }, []);
 

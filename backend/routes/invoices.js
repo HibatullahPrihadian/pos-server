@@ -52,7 +52,7 @@ const withNumbers = (row) => row && {
 // =========================================================
 router.get('/summary', requirePermission('invoice.view', 'invoice.manage'), async (req, res, next) => {
   try {
-    res.json(await getReceivableSummary());
+    res.json(await getReceivableSummary(pool, req.business));
   } catch (err) {
     next(err);
   }
@@ -71,8 +71,9 @@ router.get('/', requirePermission('invoice.view', 'invoice.manage'), async (req,
     const overdueOnly = String(req.query.overdue_only || '') === 'true';
     const search = cleanString(req.query.search, 60);
 
-    const conditions = ["s.is_credit = TRUE", "s.status = 'completed'"];
-    const params = [];
+    // Piutang dipisah per usaha; tanpa header, default 'minimarket' = perilaku lama.
+    const conditions = ["s.business = $1", "s.is_credit = TRUE", "s.status = 'completed'"];
+    const params = [req.business];
 
     if (from && isValidDate(from)) {
       params.push(from);
@@ -131,17 +132,22 @@ router.get('/', requirePermission('invoice.view', 'invoice.manage'), async (req,
 // =========================================================
 router.get('/:id', requirePermission('invoice.view', 'invoice.manage'), async (req, res, next) => {
   try {
-    const result = await pool.query(`${INVOICE_SELECT} WHERE s.id = $1 AND s.is_credit = TRUE`, [req.params.id]);
+    const result = await pool.query(
+      `${INVOICE_SELECT} WHERE s.id = $1 AND s.business = $2 AND s.is_credit = TRUE`,
+      [req.params.id, req.business]
+    );
     const invoice = result.rows[0];
     if (!invoice) throw new HttpError(404, 'Invoice tidak ditemukan');
 
     const items = await pool.query(
       `SELECT si.*, p.sku, p.name AS product_name, p.base_unit,
               b.name AS bundle_name, b.sku AS bundle_sku,
-              COALESCE(p.name, b.name) AS display_name
+              ps.name AS service_name,
+              COALESCE(p.name, b.name, ps.name) AS display_name
        FROM sale_items si
        LEFT JOIN products p ON p.id = si.product_id
        LEFT JOIN bundles b ON b.id = si.bundle_id
+       LEFT JOIN print_services ps ON ps.id = si.service_id
        WHERE si.sale_id = $1
        ORDER BY si.id`,
       [req.params.id]
@@ -186,8 +192,8 @@ router.post('/:id/payments', requirePermission('invoice.manage'), async (req, re
 
     const result = await withTransaction(async (client) => {
       const saleResult = await client.query(
-        "SELECT * FROM sales WHERE id = $1 AND is_credit = TRUE FOR UPDATE",
-        [req.params.id]
+        'SELECT * FROM sales WHERE id = $1 AND business = $2 AND is_credit = TRUE FOR UPDATE',
+        [req.params.id, req.business]
       );
       const sale = saleResult.rows[0];
       if (!sale) throw new HttpError(404, 'Invoice tidak ditemukan');
@@ -237,8 +243,8 @@ router.post('/:id/void', requirePermission('invoice.manage'), async (req, res, n
 
     const result = await withTransaction(async (client) => {
       const saleResult = await client.query(
-        'SELECT * FROM sales WHERE id = $1 AND is_credit = TRUE FOR UPDATE',
-        [req.params.id]
+        'SELECT * FROM sales WHERE id = $1 AND business = $2 AND is_credit = TRUE FOR UPDATE',
+        [req.params.id, req.business]
       );
       const sale = saleResult.rows[0];
       if (!sale) throw new HttpError(404, 'Invoice tidak ditemukan');

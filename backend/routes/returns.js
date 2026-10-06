@@ -28,8 +28,9 @@ router.get('/', async (req, res, next) => {
     const to = cleanString(req.query.to, 10);
     const saleId = toInt(req.query.sale_id, 0);
 
-    const conditions = [];
-    const params = [];
+    // Retur dipisah per usaha lewat transaksi asalnya (returns tak punya kolom usaha).
+    const conditions = ['s.business = $1'];
+    const params = [req.business];
     if (from && isValidDate(from)) {
       params.push(from);
       conditions.push(`r.created_at >= $${params.length}::date`);
@@ -44,7 +45,10 @@ router.get('/', async (req, res, next) => {
     }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const countResult = await pool.query(`SELECT COUNT(*)::int AS total FROM returns r ${where}`, params);
+    const countResult = await pool.query(
+      `SELECT COUNT(*)::int AS total FROM returns r JOIN sales s ON s.id = r.sale_id ${where}`,
+      params
+    );
     params.push(limit, offset);
     const result = await pool.query(
       `${RETURN_SELECT} ${where} ORDER BY r.created_at DESC
@@ -59,7 +63,10 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const result = await pool.query(`${RETURN_SELECT} WHERE r.id = $1`, [req.params.id]);
+    const result = await pool.query(
+      `${RETURN_SELECT} JOIN sales s ON s.id = r.sale_id WHERE r.id = $1 AND s.business = $2`,
+      [req.params.id, req.business]
+    );
     if (!result.rows[0]) throw new HttpError(404, 'Retur tidak ditemukan');
 
     const items = await pool.query(
@@ -92,7 +99,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
     if (items.length === 0) throw new HttpError(400, 'Item retur wajib diisi');
 
     const created = await withTransaction(async (client) => {
-      const saleResult = await client.query('SELECT * FROM sales WHERE id = $1 FOR UPDATE', [saleId]);
+      const saleResult = await client.query('SELECT * FROM sales WHERE id = $1 AND business = $2 FOR UPDATE', [saleId, req.business]);
       const sale = saleResult.rows[0];
       if (!sale) throw new HttpError(404, 'Transaksi tidak ditemukan');
       if (sale.status !== 'completed') throw new HttpError(400, 'Transaksi void tidak dapat diretur');
@@ -144,10 +151,11 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
       }
 
       const shift = shiftId
-        ? (await client.query('SELECT * FROM shifts WHERE id = $1 FOR UPDATE', [shiftId])).rows[0]
+        ? (await client.query('SELECT * FROM shifts WHERE id = $1 AND business = $2 FOR UPDATE', [shiftId, req.business])).rows[0]
         : null;
       if (shiftId && !shift) throw new HttpError(404, 'Shift tidak ditemukan');
       if (shift && shift.closed_at) throw new HttpError(400, 'Shift sudah ditutup');
+      if (shift && shift.business !== req.business) throw new HttpError(400, 'Shift bukan milik usaha ini');
 
       const returnResult = await client.query(
         `INSERT INTO returns (code, sale_id, shift_id, user_id, total, refund_method, reason)
@@ -158,11 +166,11 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
 
       for (const entry of prepared) {
         await client.query(
-          `INSERT INTO return_items (return_id, sale_item_id, product_id, bundle_id, qty, unit_price, refund_amount)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          `INSERT INTO return_items (return_id, sale_item_id, product_id, bundle_id, service_id, qty, unit_price, refund_amount)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
           [
             ret.id, entry.item.id, entry.item.product_id, entry.item.bundle_id,
-            entry.qty, entry.item.unit_price, entry.refund,
+            entry.item.service_id || null, entry.qty, entry.item.unit_price, entry.refund,
           ]
         );
 
@@ -170,6 +178,11 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
           'UPDATE sale_items SET returned_qty = returned_qty + $1 WHERE id = $2',
           [entry.qty, entry.item.id]
         );
+
+        // Item jasa (fotokopi) tidak menyentuh stok: cukup refund + penanda retur.
+        if (entry.item.service_id && !entry.item.product_id && !entry.item.bundle_id) {
+          continue;
+        }
 
         // Kembalikan stok retur ke batch asal (FEFO trace, fallback legacy).
         await restoreSaleItemBatches(client, entry.item, entry.qty);
@@ -193,6 +206,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
               unitCost: Number(component.cost_price),
               note: `Retur ${code}`,
               userId: req.user.id,
+              business: req.business,
               allowNegative: true,
             });
           }
@@ -211,6 +225,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
           unitCost: Math.round(entry.item.cost_price / conversionFactor),
           note: `Retur ${code}`,
           userId: req.user.id,
+          business: req.business,
           allowNegative: true,
         });
       }

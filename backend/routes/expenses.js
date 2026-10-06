@@ -32,10 +32,11 @@ router.get('/categories', async (req, res, next) => {
        FROM expense_categories ec
        LEFT JOIN (
          SELECT expense_category_id, COUNT(*)::int AS n
-         FROM expenses GROUP BY expense_category_id
+         FROM expenses WHERE business = $1 GROUP BY expense_category_id
        ) cnt ON cnt.expense_category_id = ec.id
-       ${includeInactive ? '' : 'WHERE ec.is_active = TRUE'}
-       ORDER BY ec.name`
+       WHERE ec.business = $1 ${includeInactive ? '' : 'AND ec.is_active = TRUE'}
+       ORDER BY ec.name`,
+      [req.business]
     );
     res.json(result.rows);
   } catch (err) {
@@ -48,8 +49,8 @@ router.post('/categories', requirePermission('expense.manage'), async (req, res,
     const name = requireString(req.body?.name, 'Nama kategori', 100);
     if (name.error) throw new HttpError(400, name.error);
     const result = await pool.query(
-      'INSERT INTO expense_categories (name) VALUES ($1) RETURNING *',
-      [name.value]
+      'INSERT INTO expense_categories (name, business) VALUES ($1, $2) RETURNING *',
+      [name.value, req.business]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'expense_categories', entityId: result.rows[0].id });
     res.status(201).json(result.rows[0]);
@@ -65,8 +66,8 @@ router.put('/categories/:id', requirePermission('expense.manage'), async (req, r
     const isActive = toBool(req.body?.is_active, true);
 
     const result = await pool.query(
-      'UPDATE expense_categories SET name = $1, is_active = $2 WHERE id = $3 RETURNING *',
-      [name.value, isActive, req.params.id]
+      'UPDATE expense_categories SET name = $1, is_active = $2 WHERE id = $3 AND business = $4 RETURNING *',
+      [name.value, isActive, req.params.id, req.business]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Kategori beban tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'update', entity: 'expense_categories', entityId: Number(req.params.id) });
@@ -79,11 +80,14 @@ router.put('/categories/:id', requirePermission('expense.manage'), async (req, r
 // Hapus hanya jika belum dipakai beban; jika tidak, nonaktifkan saja.
 router.delete('/categories/:id', requirePermission('expense.manage'), async (req, res, next) => {
   try {
-    const used = await pool.query('SELECT COUNT(*)::int AS n FROM expenses WHERE expense_category_id = $1', [req.params.id]);
+    const used = await pool.query(
+      'SELECT COUNT(*)::int AS n FROM expenses WHERE expense_category_id = $1 AND business = $2',
+      [req.params.id, req.business]
+    );
     if (used.rows[0].n > 0) {
       throw new HttpError(409, 'Kategori masih dipakai beban; nonaktifkan saja');
     }
-    const result = await pool.query('DELETE FROM expense_categories WHERE id = $1 RETURNING id', [req.params.id]);
+    const result = await pool.query('DELETE FROM expense_categories WHERE id = $1 AND business = $2 RETURNING id', [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Kategori beban tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'delete', entity: 'expense_categories', entityId: Number(req.params.id) });
     res.json({ message: 'Kategori beban dihapus' });
@@ -103,8 +107,9 @@ router.get('/', async (req, res, next) => {
     const from = cleanString(req.query.from, 10);
     const to = cleanString(req.query.to, 10);
 
-    const conditions = [];
-    const params = [];
+    // Beban dipisah per usaha (default 'minimarket' = perilaku lama).
+    const conditions = ['e.business = $1'];
+    const params = [req.business];
     if (categoryId > 0) {
       params.push(categoryId);
       conditions.push(`e.expense_category_id = $${params.length}`);
@@ -144,7 +149,7 @@ router.get('/', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const result = await pool.query(`${EXPENSE_SELECT} WHERE e.id = $1`, [req.params.id]);
+    const result = await pool.query(`${EXPENSE_SELECT} WHERE e.id = $1 AND e.business = $2`, [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Beban tidak ditemukan');
     const row = result.rows[0];
     res.json({ ...row, amount: Number(row.amount), paid_amount: Number(row.paid_amount) });
@@ -184,11 +189,11 @@ router.post('/', requirePermission('expense.manage'), async (req, res, next) => 
     const created = await withTransaction(async (client) => {
       const code = await nextDocNumber(client, 'EXP', payload.date || undefined);
       const result = await client.query(
-        `INSERT INTO expenses (code, expense_category_id, date, amount, payment_status, paid_amount, method, note, user_id)
-         VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE), $4, $5, $6, $7, $8, $9) RETURNING *`,
+        `INSERT INTO expenses (code, expense_category_id, date, amount, payment_status, paid_amount, method, note, user_id, business)
+         VALUES ($1, $2, COALESCE($3::date, CURRENT_DATE), $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
         [
           code, payload.categoryId, payload.date || null, payload.amount,
-          payload.paymentStatus, payload.paidAmount, payload.method, payload.note, req.user.id,
+          payload.paymentStatus, payload.paidAmount, payload.method, payload.note, req.user.id, req.business,
         ]
       );
       return result.rows[0];
@@ -209,17 +214,18 @@ router.post('/', requirePermission('expense.manage'), async (req, res, next) => 
 
 router.put('/:id', requirePermission('expense.manage'), async (req, res, next) => {
   try {
-    const existing = await pool.query('SELECT * FROM expenses WHERE id = $1', [req.params.id]);
+    const existing = await pool.query('SELECT * FROM expenses WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!existing.rows[0]) throw new HttpError(404, 'Beban tidak ditemukan');
 
     const payload = buildExpense(req.body, Number(existing.rows[0].paid_amount));
     const updated = await pool.query(
       `UPDATE expenses SET expense_category_id = $1, date = COALESCE($2::date, date), amount = $3,
          payment_status = $4, paid_amount = $5, method = $6, note = $7
-       WHERE id = $8 RETURNING *`,
+       WHERE id = $8 AND business = $9 RETURNING *`,
       [
         payload.categoryId, payload.date || null, payload.amount,
-        payload.paymentStatus, payload.paidAmount, payload.method, payload.note, req.params.id,
+        payload.paymentStatus, payload.paidAmount, payload.method, payload.note,
+        req.params.id, req.business,
       ]
     );
 
@@ -240,10 +246,10 @@ router.put('/:id', requirePermission('expense.manage'), async (req, res, next) =
 // input beban tunai harus bisa dikoreksi; konfirmasi dilakukan di UI.
 router.delete('/:id', requirePermission('expense.manage'), async (req, res, next) => {
   try {
-    const existing = await pool.query('SELECT * FROM expenses WHERE id = $1', [req.params.id]);
+    const existing = await pool.query('SELECT * FROM expenses WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!existing.rows[0]) throw new HttpError(404, 'Beban tidak ditemukan');
 
-    await pool.query('DELETE FROM expenses WHERE id = $1', [req.params.id]);
+    await pool.query('DELETE FROM expenses WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     await logAudit(pool, {
       userId: req.user.id,
       action: 'delete',
@@ -264,7 +270,7 @@ router.post('/:id/payment', requirePermission('expense.manage'), async (req, res
     if (!Number.isFinite(amount) || amount <= 0) throw new HttpError(400, 'Jumlah bayar tidak valid');
 
     const updated = await withTransaction(async (client) => {
-      const result = await client.query('SELECT * FROM expenses WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const result = await client.query('SELECT * FROM expenses WHERE id = $1 AND business = $2 FOR UPDATE', [req.params.id, req.business]);
       const expense = result.rows[0];
       if (!expense) throw new HttpError(404, 'Beban tidak ditemukan');
 
@@ -273,8 +279,8 @@ router.post('/:id/payment', requirePermission('expense.manage'), async (req, res
       const paymentStatus = newPaid >= total ? 'paid' : 'unpaid';
 
       const res2 = await client.query(
-        'UPDATE expenses SET paid_amount = $1, payment_status = $2 WHERE id = $3 RETURNING *',
-        [newPaid, paymentStatus, expense.id]
+        'UPDATE expenses SET paid_amount = $1, payment_status = $2 WHERE id = $3 AND business = $4 RETURNING *',
+        [newPaid, paymentStatus, expense.id, req.business]
       );
       return res2.rows[0];
     });

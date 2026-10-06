@@ -5,13 +5,15 @@ import {
   ClipboardList, ShoppingBag, Users, Clock, BarChart3, UserCog, Settings,
   LogOut, ChevronLeft, ChevronRight, Lock, Store, BadgePercent, PackagePlus,
   HandCoins, CalendarCheck, LogIn, LogOut as LogOutIcon, Wallet, Building2, FileText,
+  Printer, FilePlus2, ArrowLeftRight, LayoutGrid,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useBusiness, BUSINESS_META } from '../../context/BusinessContext';
 import { api } from '../../api/client';
 import { useToastContext } from '../../context/ToastContext';
 
 // Menu dikelompokkan; `permission` menyembunyikan item dari user tanpa izin.
-const MENU = [
+const MENU_MINIMARKET = [
   {
     section: 'Operasional',
     items: [
@@ -55,13 +57,56 @@ const MENU = [
   },
 ];
 
-const ROLE_LABELS = { admin: 'Administrator', kasir: 'Kasir', gudang: 'Gudang' };
+const ROLE_LABELS = { admin: 'Administrator', kasir: 'Kasir', gudang: 'Gudang', operator: 'Operator Fotokopi' };
+
+// Menu ringkasan owner (mode 'all'): hanya ringkasan gabungan + pengaturan umum.
+const MENU_ALL = [
+  {
+    section: 'Ringkasan',
+    items: [
+      { path: '/overview', name: 'Semua Usaha', icon: LayoutGrid, permission: 'report.view' },
+    ],
+  },
+];
+
+// Menu mode fotokopi: antrian pesanan jadi pusat operasional (menggantikan POS).
+const MENU_PRINT = [
+  {
+    section: 'Operasional',
+    items: [
+      { path: '/', name: 'Dashboard', icon: LayoutDashboard, permission: 'report.view' },
+      { path: '/print-orders', name: 'Pesanan', icon: ClipboardList, permission: 'print.use' },
+      { path: '/print-orders/new', name: 'Buat Pesanan', icon: FilePlus2, permission: 'print.use' },
+      { path: '/shifts', name: 'Shift', icon: Clock, permission: 'shift.use' },
+      { path: '/attendance', name: 'Absensi', icon: CalendarCheck, permission: 'attendance.self' },
+    ],
+  },
+  {
+    section: 'Inventori',
+    items: [
+      { path: '/products', name: 'Produk', icon: Package, permission: 'product.view' },
+      { path: '/stock', name: 'Stok', icon: Boxes, permission: 'stock.view' },
+      { path: '/purchases', name: 'Pembelian', icon: ShoppingBag, permission: 'purchase.view' },
+    ],
+  },
+  {
+    section: 'Fotokopi',
+    items: [
+      { path: '/print-services', name: 'Master Jasa', icon: Printer, permission: 'print.manage' },
+      { path: '/print-reports', name: 'Laporan', icon: BarChart3, permission: 'print.report' },
+      { path: '/customers', name: 'Pelanggan', icon: Users, permission: 'customer.manage' },
+      { path: '/settings', name: 'Pengaturan Usaha', icon: Settings, permission: 'settings.manage' },
+    ],
+  },
+];
 
 const Sidebar = () => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { user, can, logout } = useAuth();
+  const { business, canSwitch, setBusiness, clearBusiness } = useBusiness();
   const toast = useToastContext();
   const navigate = useNavigate();
+  const MENU = business === 'all' ? MENU_ALL : business === 'fotokopi' ? MENU_PRINT : MENU_MINIMARKET;
 
   // Absensi hari ini untuk tombol cepat di sidebar (kasir & admin).
   const [attendance, setAttendance] = useState(null);
@@ -175,10 +220,38 @@ const Sidebar = () => {
           <div className="mb-2 px-2">
             <p className="text-sm font-medium text-white truncate">{user?.full_name}</p>
             <p className="text-xs text-slate-400 flex items-center gap-1">
-              {ROLE_LABELS[user?.role] || 'Kasir'} <Lock size={10} />
+              {ROLE_LABELS[user?.role] || 'Kasir'}
+              {' · '}
+              <span className={business === 'fotokopi' ? 'text-ios-purple' : 'text-ios-blue'}>
+                {business === 'all' ? 'Semua Usaha' : (BUSINESS_META[business]?.label || business)}
+              </span>
+              <Lock size={10} />
             </p>
           </div>
         ) : null}
+
+        {canSwitch && (
+          <>
+            {business !== 'all' && (
+              <button
+                onClick={() => setBusiness('all')}
+                className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-slate-300 hover:bg-white/10 hover:text-white transition-colors ${isCollapsed ? 'justify-center' : ''}`}
+                title="Semua Usaha"
+              >
+                <LayoutGrid size={18} />
+                {!isCollapsed && <span>Semua Usaha</span>}
+              </button>
+            )}
+            <button
+              onClick={() => { clearBusiness(); navigate('/'); }}
+              className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-purple hover:bg-ios-purple/10 transition-colors ${isCollapsed ? 'justify-center' : ''}`}
+              title="Ganti Usaha"
+            >
+              <ArrowLeftRight size={18} />
+              {!isCollapsed && <span>Ganti Usaha</span>}
+            </button>
+          </>
+        )}
 
         {/* Absen masuk/pulang cepat. Setelah masuk & belum pulang, tampilkan tombol pulang. */}
         {canAbsen && (attendance?.check_in && !attendance?.check_out ? (

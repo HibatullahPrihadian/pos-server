@@ -45,7 +45,7 @@ const verifyJwt = async (req, res, next) => {
 
   try {
     const result = await pool.query(
-      'SELECT id, username, full_name, role, permissions, is_active FROM users WHERE id = $1',
+      'SELECT id, username, full_name, role, permissions, is_active, business FROM users WHERE id = $1',
       [payload.sub]
     );
     const user = result.rows[0];
@@ -58,12 +58,53 @@ const verifyJwt = async (req, res, next) => {
       full_name: user.full_name,
       role: user.role,
       permissions: user.permissions,
+      business: user.business || null,
       is_admin: user.role === 'admin',
     };
     return next();
   } catch (err) {
     return next(err);
   }
+};
+
+// =========================================================
+// Multi-usaha: mode aktif dikirim klien lewat header X-Business.
+// =========================================================
+const BUSINESSES = ['minimarket', 'fotokopi'];
+
+// Usaha yang tersedia bagi seorang user (NULL = semua usaha, untuk owner/admin).
+const availableBusinesses = (user) => (user?.business ? [user.business] : [...BUSINESSES]);
+
+// Menetapkan req.business. Header kosong -> 'minimarket' (kompatibel klien lama).
+// Header tak dikenal -> 400 agar typo tidak diam-diam jatuh ke minimarket.
+// Staf hanya boleh mengakses usaha yang ditetapkan padanya, selain itu 403.
+const resolveBusiness = (req, res, next) => {
+  const raw = String(req.headers['x-business'] || '').trim().toLowerCase();
+  const requested = raw === '' ? 'minimarket' : raw;
+
+  // 'all' = ringkasan gabungan owner; hanya untuk endpoint overview.
+  if (requested === 'all') {
+    const path = req.originalUrl.split('?')[0];
+    if (path !== '/api/reports/overview') {
+      return res.status(400).json({ error: 'X-Business: all hanya berlaku untuk ringkasan gabungan' });
+    }
+    if (req.user?.business) {
+      return res.status(403).json({ error: 'Akses ditolak: usaha di luar penugasan Anda' });
+    }
+    req.business = 'all';
+    return next();
+  }
+
+  if (!BUSINESSES.includes(requested)) {
+    return res.status(400).json({ error: `Nilai X-Business tidak dikenal: ${raw}` });
+  }
+
+  if (req.user?.business && req.user.business !== requested) {
+    return res.status(403).json({ error: 'Akses ditolak: usaha di luar penugasan Anda' });
+  }
+
+  req.business = requested;
+  return next();
 };
 
 // Batasi endpoint ke role tertentu, mis. requireRole('admin').
@@ -109,4 +150,13 @@ const signToken = (user) =>
 // Dipanggil saat bootstrap agar konfigurasi salah terdeteksi lebih awal.
 const assertJwtSecret = () => getSecret();
 
-module.exports = { verifyJwt, requireRole, requirePermission, signToken, assertJwtSecret };
+module.exports = {
+  verifyJwt,
+  requireRole,
+  requirePermission,
+  signToken,
+  assertJwtSecret,
+  resolveBusiness,
+  availableBusinesses,
+  BUSINESSES,
+};

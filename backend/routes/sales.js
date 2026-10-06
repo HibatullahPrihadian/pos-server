@@ -85,6 +85,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
       const shift = shiftResult.rows[0];
       if (!shift) throw new HttpError(404, 'Shift tidak ditemukan');
       if (shift.closed_at) throw new HttpError(400, 'Shift sudah ditutup');
+      if (shift.business !== req.business) throw new HttpError(400, 'Shift bukan milik usaha ini');
       if (!req.user.is_admin && shift.user_id !== req.user.id) {
         throw new HttpError(403, 'Shift ini bukan milik Anda');
       }
@@ -367,13 +368,13 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
         `INSERT INTO sales
           (invoice_no, shift_id, cashier_id, member_id, customer_id, is_credit, due_date,
            paid_amount, payment_status, subtotal, item_discount, txn_discount,
-           points_value, tax_total, grand_total, points_earned, points_redeemed, status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'completed')
+           points_value, tax_total, grand_total, points_earned, points_redeemed, status, business)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'completed',$18)
          RETURNING *`,
         [
           invoiceNo, shiftId, req.user.id, memberId, isCredit ? customer.id : null, isCredit, dueDate,
           paidAmount, paymentStatus, subtotal, itemDiscountTotal, txnDiscountInput,
-          pointsValue, taxTotal, grandTotal, earned, pointsRedeemed,
+          pointsValue, taxTotal, grandTotal, earned, pointsRedeemed, req.business,
         ]
       );
       const sale = saleResult.rows[0];
@@ -428,6 +429,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
           unitCost: line.baseCostPrice,
           note: invoiceNo,
           userId: req.user.id,
+          business: req.business,
           allowNegative: allowNegativeStock,
         });
       }
@@ -492,6 +494,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
             unitCost: mv.baseCostPrice,
             note: `${invoiceNo} (paket ${line.bundle.name})`,
             userId: req.user.id,
+            business: req.business,
             allowNegative: allowNegativeStock,
           });
         }
@@ -580,9 +583,9 @@ router.get('/', async (req, res, next) => {
     const method = cleanString(req.query.method, 10);
     const invoiceNo = cleanString(req.query.invoice_no, 40);
 
-    const conditions = [];
-    const params = [];
-
+    // Penjualan dipisah per usaha; tanpa header, default 'minimarket' = perilaku lama.
+    const conditions = ['s.business = $1'];
+    const params = [req.business];
     if (from && isValidDate(from)) {
       params.push(from);
       conditions.push(`s.created_at >= $${params.length}::date`);
@@ -638,11 +641,13 @@ const loadSaleDetail = async (runner, whereClause, params) => {
   const items = await runner.query(
     `SELECT si.*, p.sku, p.name AS product_name, p.base_unit,
             b.name AS bundle_name, b.sku AS bundle_sku,
-            COALESCE(p.name, b.name) AS display_name,
+            ps.name AS service_name,
+            COALESCE(p.name, b.name, ps.name) AS display_name,
             si.returned_qty
      FROM sale_items si
      LEFT JOIN products p ON p.id = si.product_id
      LEFT JOIN bundles b ON b.id = si.bundle_id
+     LEFT JOIN print_services ps ON ps.id = si.service_id
      WHERE si.sale_id = $1
      ORDER BY si.id`,
     [sale.id]
@@ -660,7 +665,7 @@ const loadSaleDetail = async (runner, whereClause, params) => {
 
 router.get('/by-invoice/:invoiceNo', async (req, res, next) => {
   try {
-    const detail = await loadSaleDetail(pool, 'WHERE s.invoice_no = $1', [req.params.invoiceNo]);
+    const detail = await loadSaleDetail(pool, 'WHERE s.invoice_no = $1 AND s.business = $2', [req.params.invoiceNo, req.business]);
     if (!detail) throw new HttpError(404, 'Transaksi tidak ditemukan');
     res.json(detail);
   } catch (err) {
@@ -670,7 +675,7 @@ router.get('/by-invoice/:invoiceNo', async (req, res, next) => {
 
 router.get('/:id', async (req, res, next) => {
   try {
-    const detail = await loadSaleDetail(pool, 'WHERE s.id = $1', [req.params.id]);
+    const detail = await loadSaleDetail(pool, 'WHERE s.id = $1 AND s.business = $2', [req.params.id, req.business]);
     if (!detail) throw new HttpError(404, 'Transaksi tidak ditemukan');
     res.json(detail);
   } catch (err) {
@@ -686,7 +691,7 @@ router.post('/:id/void', requirePermission('pos.use'), async (req, res, next) =>
     const reason = cleanString(req.body?.reason, 300) || 'Tanpa alasan';
 
     const result = await withTransaction(async (client) => {
-      const saleResult = await client.query('SELECT * FROM sales WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const saleResult = await client.query('SELECT * FROM sales WHERE id = $1 AND business = $2 FOR UPDATE', [req.params.id, req.business]);
       const sale = saleResult.rows[0];
       if (!sale) throw new HttpError(404, 'Transaksi tidak ditemukan');
       if (sale.status === 'void') throw new HttpError(400, 'Transaksi sudah di-void');

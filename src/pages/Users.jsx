@@ -20,10 +20,11 @@ const EMPTY = {
   role: 'kasir',
   is_active: true,
   permissions: null,
+  business: '',
 };
 
-const ROLE_LABELS = { admin: 'Admin', kasir: 'Kasir', gudang: 'Gudang' };
-const ROLE_TONES = { admin: 'purple', kasir: 'blue', gudang: 'orange' };
+const ROLE_LABELS = { admin: 'Admin', kasir: 'Kasir', gudang: 'Gudang', operator: 'Operator' };
+const ROLE_TONES = { admin: 'purple', kasir: 'blue', gudang: 'orange', operator: 'purple' };
 
 const Users = () => {
   const toast = useToastContext();
@@ -85,6 +86,7 @@ const Users = () => {
       role: row.role,
       is_active: row.is_active,
       permissions: isCustom ? [...row.permissions] : [],
+      business: row.business || '',
     });
     setUseCustomPermissions(isCustom);
     setModalOpen(true);
@@ -109,6 +111,8 @@ const Users = () => {
       if (form.password) payload.password = form.password;
       if (useCustomPermissions) payload.permissions = form.permissions || [];
       else payload.permissions = null;
+      // '' = lintas usaha (owner/admin); selain itu terikat satu usaha.
+      payload.business = form.business || null;
 
       if (editing) await api.put(`/api/users/${editing.id}`, payload);
       else await api.post('/api/users', payload);
@@ -160,6 +164,11 @@ const Users = () => {
                   <Badge tone={ROLE_TONES[row.role] || 'blue'}>
                     {ROLE_LABELS[row.role] || row.role}
                   </Badge>
+                  {row.business && (
+                    <Badge tone={row.business === 'fotokopi' ? 'purple' : 'blue'} className="mt-1 block">
+                      {row.business === 'fotokopi' ? 'Fotokopi' : 'Minimarket'}
+                    </Badge>
+                  )}
                 </td>
                 <td className="px-4 py-3 text-center">
                   {row.is_active ? <Badge tone="green">Aktif</Badge> : <Badge tone="red">Nonaktif</Badge>}
@@ -218,7 +227,18 @@ const Users = () => {
           >
             <option value="kasir">Kasir</option>
             <option value="gudang">Gudang</option>
+            <option value="operator">Operator Fotokopi</option>
             <option value="admin">Admin</option>
+          </Input>
+          <Input
+            as="select"
+            label="Usaha"
+            value={form.business || ''}
+            onChange={(e) => setForm({ ...form, business: e.target.value })}
+          >
+            <option value="">Semua usaha (lintas mode)</option>
+            <option value="minimarket">Hanya Minimarket</option>
+            <option value="fotokopi">Hanya Fotokopi</option>
           </Input>
           {editing && (
             <Input as="select" label="Status" value={form.is_active ? '1' : '0'} onChange={(e) => setForm({ ...form, is_active: e.target.value === '1' })}>

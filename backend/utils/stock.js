@@ -22,6 +22,7 @@ const applyStockMovement = async (client, {
   userId = null,
   allowNegative = false,
   newCostPrice = undefined,
+  business = null,
 }) => {
   const locked = await client.query(
     'SELECT id, stock_qty, cost_price, name FROM products WHERE id = $1 FOR UPDATE',
@@ -44,11 +45,13 @@ const applyStockMovement = async (client, {
     );
   }
 
+  // business: diisi pemanggil bila diketahui; jika null, DB memakai default
+  // 'minimarket' (kompatibel dengan pemanggil lama). COALESCE menjaga NOT NULL.
   await client.query(
     `INSERT INTO stock_movements
-      (product_id, qty_change, balance_after, type, ref_type, ref_id, unit_cost, note, user_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [productId, qtyChange, balance, type, refType, refId, unitCost, note, userId]
+      (product_id, qty_change, balance_after, type, ref_type, ref_id, unit_cost, note, user_id, business)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, 'minimarket'))`,
+    [productId, qtyChange, balance, type, refType, refId, unitCost, note, userId, business]
   );
 
   return { balance, previousQty: product.stock_qty, previousCost: product.cost_price };

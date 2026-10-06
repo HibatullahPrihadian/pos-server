@@ -253,6 +253,9 @@ const restoreSaleStock = async (client, sale, { userId = null, type = 'void' } =
     const unreturnedQty = item.qty - item.returned_qty;
     if (unreturnedQty <= 0) continue;
 
+    // Item jasa (fotokopi): tidak ada stok untuk dikembalikan.
+    if (item.service_id && !item.product_id && !item.bundle_id) continue;
+
     await restoreSaleItemBatches(client, item, unreturnedQty);
 
     if (item.bundle_id) {
