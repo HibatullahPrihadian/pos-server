@@ -291,76 +291,74 @@ const MinimarketDashboard = () => {
         />
       </div>
 
+      <Card
+        title="Tren Penjualan Bulan Ini"
+        className="flex flex-col mb-5"
+        bodyClassName="h-[400px] flex flex-col"
+      >
+        <TrendLineChart data={data.trend} />
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card
-          title="Tren Penjualan Bulan Ini"
-          className="lg:col-span-2 flex flex-col"
-          bodyClassName="flex-1 min-h-48 flex flex-col"
-        >
-          <TrendLineChart data={data.trend} />
+        <Card title="Produk Terlaris (30 hari)">
+          {data.top_products.length === 0 ? (
+            <p className="text-sm text-slate-500">Belum ada penjualan</p>
+          ) : (
+            <div className="space-y-2">
+              {data.top_products.map((product, index) => (
+                <div key={index} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-300 flex items-center gap-2 truncate">
+                    <span className="w-5 text-slate-500">{index + 1}.</span>
+                    {product.product_name}
+                  </span>
+                  <Badge tone="blue">{product.qty_sold}</Badge>
+                </div>
+              ))}
+            </div>
+          )}
         </Card>
 
-        <div className="space-y-5">
-          <Card title="Produk Terlaris (30 hari)">
-            {data.top_products.length === 0 ? (
-              <p className="text-sm text-slate-500">Belum ada penjualan</p>
-            ) : (
-              <div className="space-y-2">
-                {data.top_products.map((product, index) => (
-                  <div key={index} className="flex items-center justify-between text-sm">
-                    <span className="text-slate-300 flex items-center gap-2 truncate">
-                      <span className="w-5 text-slate-500">{index + 1}.</span>
-                      {product.product_name}
-                    </span>
-                    <Badge tone="blue">{product.qty_sold}</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card title="Batch Akan/ Sudah Kadaluarsa">
-            {(!expiring || (expiring.expiring.length === 0 && expiring.expired.length === 0)) ? (
-              <p className="text-sm text-slate-500">Tidak ada batch mendekati kadaluarsa</p>
-            ) : (
-              <div className="space-y-2 max-h-64 overflow-y-auto">
-                {[...expiring.expired, ...expiring.expiring].slice(0, 8).map((batch) => (
-                  <div key={batch.id} className="flex items-center justify-between text-sm gap-2">
-                    <span className="text-slate-300 truncate">
-                      {batch.product_name}
-                      {batch.batch_code ? <span className="text-slate-500"> · {batch.batch_code}</span> : null}
-                    </span>
-                    <span className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs text-slate-500">{formatDate(batch.expiry_date)}</span>
-                      <Badge tone={batch.is_expired ? 'red' : 'orange'}>{batch.qty_remaining}</Badge>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card title="Pintasan">
-            <div className="space-y-2">
-              <Link to="/pos" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
-                <span className="text-white text-sm flex items-center gap-2"><ShoppingBag size={16} /> Buka Kasir</span>
-                <ArrowRight size={16} className="text-slate-400" />
-              </Link>
-              <Link to="/stock" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
-                <span className="text-white text-sm flex items-center gap-2"><AlertTriangle size={16} /> Cek Stok Minimum</span>
-                <ArrowRight size={16} className="text-slate-400" />
-              </Link>
-              <Link to="/reports" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
-                <span className="text-white text-sm flex items-center gap-2"><Receipt size={16} /> Lihat Laporan</span>
-                <ArrowRight size={16} className="text-slate-400" />
-              </Link>
-              <div className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm">
-                <span className="text-slate-400 text-sm flex items-center gap-2"><Clock size={16} /> Shift Terbuka</span>
-                <Badge tone={data.open_shifts > 0 ? 'green' : 'neutral'}>{data.open_shifts}</Badge>
-              </div>
+        <Card title="Batch Akan/ Sudah Kadaluarsa">
+          {(!expiring || (expiring.expiring.length === 0 && expiring.expired.length === 0)) ? (
+            <p className="text-sm text-slate-500">Tidak ada batch mendekati kadaluarsa</p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {[...expiring.expired, ...expiring.expiring].slice(0, 8).map((batch) => (
+                <div key={batch.id} className="flex items-center justify-between text-sm gap-2">
+                  <span className="text-slate-300 truncate">
+                    {batch.product_name}
+                    {batch.batch_code ? <span className="text-slate-500"> · {batch.batch_code}</span> : null}
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-slate-500">{formatDate(batch.expiry_date)}</span>
+                    <Badge tone={batch.is_expired ? 'red' : 'orange'}>{batch.qty_remaining}</Badge>
+                  </span>
+                </div>
+              ))}
             </div>
-          </Card>
-        </div>
+          )}
+        </Card>
+
+        <Card title="Pintasan">
+          <div className="space-y-2">
+            <Link to="/pos" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
+              <span className="text-white text-sm flex items-center gap-2"><ShoppingBag size={16} /> Buka Kasir</span>
+              <ArrowRight size={16} className="text-slate-400" />
+            </Link>
+            <Link to="/stock" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
+              <span className="text-white text-sm flex items-center gap-2"><AlertTriangle size={16} /> Cek Stok Minimum</span>
+              <ArrowRight size={16} className="text-slate-400" />
+            </Link>
+            <Link to="/reports" className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm hover:bg-white/10 transition-colors">
+              <span className="text-white text-sm flex items-center gap-2"><Receipt size={16} /> Lihat Laporan</span>
+              <ArrowRight size={16} className="text-slate-400" />
+            </Link>
+            <div className="flex items-center justify-between p-3 bg-white/5 rounded-ios-sm">
+              <span className="text-slate-400 text-sm flex items-center gap-2"><Clock size={16} /> Shift Terbuka</span>
+              <Badge tone={data.open_shifts > 0 ? 'green' : 'neutral'}>{data.open_shifts}</Badge>
+            </div>
+          </div>
+        </Card>
       </div>
     </div>
   );

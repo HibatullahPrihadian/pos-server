@@ -22,6 +22,7 @@ const MENU_MINIMARKET = [
       { path: '/transactions', name: 'Transaksi', icon: Receipt, permission: 'pos.use' },
       { path: '/shifts', name: 'Shift', icon: Clock, permission: 'shift.use' },
       { path: '/attendance', name: 'Absensi', icon: CalendarCheck, permission: 'attendance.self' },
+      { path: '/expenses', name: 'Operasional', icon: Wallet, permission: 'expense.manage' },
     ],
   },
   {
@@ -36,7 +37,6 @@ const MENU_MINIMARKET = [
       { path: '/stock', name: 'Stok', icon: Boxes, permission: 'stock.view' },
       { path: '/stock-opname', name: 'Opname', icon: ClipboardList, permission: 'stock.view' },
       { path: '/purchases', name: 'Pembelian', icon: ShoppingBag, permission: 'purchase.view' },
-      { path: '/expenses', name: 'Operasional', icon: Wallet, permission: 'expense.manage' },
     ],
   },
   {
