@@ -30,7 +30,7 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue', to }) => {
         <div>
           <p className="text-xs text-slate-400 uppercase tracking-wide">{label}</p>
           <p className="text-2xl font-bold text-white mt-2">{value}</p>
-          {sub && <p className="text-xs text-slate-500 mt-1">{sub}</p>}
+          <p className="text-xs text-slate-500 mt-1">{sub || '\u00A0'}</p>
         </div>
         <div className={`p-3 rounded-ios-sm border ${tones[tone]}`}>
           <Icon size={20} />
@@ -52,6 +52,21 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue', to }) => {
     </Link>
   );
 };
+
+const KPISection = ({ title, cols = 4, children }) => (
+  <section className="mb-6">
+    <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{title}</h2>
+    <div
+      className={`grid grid-cols-1 gap-4 ${
+        cols === 3 ? 'md:grid-cols-2 xl:grid-cols-3'
+          : cols === 2 ? 'md:grid-cols-2'
+            : 'md:grid-cols-2 xl:grid-cols-4'
+      }`}
+    >
+      {children}
+    </div>
+  </section>
+);
 
 // Dashboard mode fotokopi: fokus pada antrian pesanan & pendapatan jasa.
 // Data stok/piutang minimarket sengaja tidak ditampilkan (bukan milik usaha ini).
@@ -208,7 +223,7 @@ const MinimarketDashboard = () => {
     <div>
       <PageHeader title="Dashboard" subtitle="Ringkasan operasional toko" />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <KPISection title="Penjualan & Laba" cols={3}>
         <KPI
           icon={TrendingUp}
           label="Penjualan Hari Ini"
@@ -234,14 +249,6 @@ const MinimarketDashboard = () => {
           to={linkTo('/reports?tab=profit-loss')}
         />
         <KPI
-          icon={Wallet}
-          label="Laba Bersih Bulan Ini"
-          value={formatCurrency(data.month.net_profit ?? 0)}
-          sub={`Beban ${formatCurrency(data.month.expense ?? 0)}`}
-          tone={(data.month.net_profit ?? 0) >= 0 ? 'blue' : 'red'}
-          to={linkTo('/reports?tab=profit-loss')}
-        />
-        <KPI
           icon={Receipt}
           label="Penjualan Bulan Ini"
           value={formatCurrency(data.month.grand_total)}
@@ -250,6 +257,25 @@ const MinimarketDashboard = () => {
           to={linkTo('/reports?tab=sales-summary')}
         />
         <KPI
+          icon={PiggyBank}
+          label="Laba Kotor Bulan Ini"
+          value={formatCurrency(data.month.gross_profit)}
+          sub={null}
+          tone="purple"
+          to={linkTo('/reports?tab=gross-profit')}
+        />
+        <KPI
+          icon={Wallet}
+          label="Laba Bersih Bulan Ini"
+          value={formatCurrency(data.month.net_profit ?? 0)}
+          sub={`Beban ${formatCurrency(data.month.expense ?? 0)}`}
+          tone={(data.month.net_profit ?? 0) >= 0 ? 'blue' : 'red'}
+          to={linkTo('/reports?tab=profit-loss')}
+        />
+      </KPISection>
+
+      <KPISection title="Kas & Modal">
+        <KPI
           icon={ShoppingBag}
           label="Modal"
           value={formatCurrency(data.month.purchase_paid ?? 0)}
@@ -257,6 +283,17 @@ const MinimarketDashboard = () => {
           tone="blue"
           to={linkTo('/reports?tab=purchase-paid')}
         />
+        <KPI
+          icon={HandCoins}
+          label="Piutang Grosir"
+          value={formatCurrency(data.receivable?.outstanding_total ?? 0)}
+          sub={`Lewat jatuh tempo: ${formatCurrency(data.receivable?.overdue_total ?? 0)}`}
+          tone={(data.receivable?.overdue_total ?? 0) > 0 ? 'red' : 'orange'}
+          to={linkTo('/invoices')}
+        />
+      </KPISection>
+
+      <KPISection title="Stok">
         <KPI
           icon={AlertTriangle}
           label="Stok Minimum"
@@ -281,15 +318,7 @@ const MinimarketDashboard = () => {
           tone="red"
           to={linkTo('/stock?tab=batches')}
         />
-        <KPI
-          icon={HandCoins}
-          label="Piutang Grosir"
-          value={formatCurrency(data.receivable?.outstanding_total ?? 0)}
-          sub={`Lewat jatuh tempo: ${formatCurrency(data.receivable?.overdue_total ?? 0)}`}
-          tone={(data.receivable?.overdue_total ?? 0) > 0 ? 'red' : 'orange'}
-          to={linkTo('/invoices')}
-        />
-      </div>
+      </KPISection>
 
       <Card
         title="Tren Penjualan Bulan Ini"
