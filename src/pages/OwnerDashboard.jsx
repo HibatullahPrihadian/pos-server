@@ -8,6 +8,7 @@ import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Spinner from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
+import TrendLineChart from '../components/charts/TrendLineChart';
 import { formatCurrency } from '../utils/formatters';
 
 const ICONS = { minimarket: Store, fotokopi: Printer };
@@ -48,8 +49,6 @@ const OwnerDashboard = () => {
   if (loading) return <Spinner label="Memuat ringkasan semua usaha..." />;
   if (!data) return null;
 
-  const maxTrend = Math.max(...(data.trend || []).map((t) => t.grand_total), 1);
-
   const enterBusiness = (business) => setBusiness(business);
 
   return (
@@ -83,23 +82,12 @@ const OwnerDashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <Card title="Tren Gabungan 7 Hari" className="lg:col-span-2">
-          {!data.trend?.length ? (
-            <p className="text-sm text-slate-500 py-8 text-center">Belum ada penjualan</p>
-          ) : (
-            <div className="flex items-end gap-2 h-48">
-              {data.trend.map((item) => (
-                <div key={item.date} className="flex-1 flex flex-col items-center gap-2">
-                  <div className="text-xs text-slate-400">{formatCurrency(item.grand_total).replace('Rp', '')}</div>
-                  <div
-                    className="w-full bg-gradient-to-t from-ios-blue to-ios-purple rounded-t"
-                    style={{ height: `${Math.max(4, (item.grand_total / maxTrend) * 140)}px` }}
-                  />
-                  <div className="text-xs text-slate-500">{item.date.slice(8)}/{item.date.slice(5, 7)}</div>
-                </div>
-              ))}
-            </div>
-          )}
+        <Card
+          title="Tren Gabungan Bulan Ini"
+          className="lg:col-span-2 flex flex-col"
+          bodyClassName="flex-1 min-h-48 flex flex-col"
+        >
+          <TrendLineChart data={data.trend || []} />
         </Card>
 
         <Card title="Shift Terbuka per Usaha">
