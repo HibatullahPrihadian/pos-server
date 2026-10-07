@@ -12,7 +12,8 @@ import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Spinner from '../components/ui/Spinner';
 import Badge from '../components/ui/Badge';
-import { formatCurrency, formatDate, todayIso } from '../utils/formatters';
+import TrendLineChart, { zeroFillDailySeries } from '../components/charts/TrendLineChart';
+import { formatCurrency, formatDate, todayIso, firstOfMonthIso } from '../utils/formatters';
 
 const KPI = ({ icon: Icon, label, value, sub, tone = 'blue', to }) => {
   const tones = {
@@ -61,9 +62,7 @@ const PrintDashboard = () => {
 
   useEffect(() => {
     const to = todayIso();
-    const d = new Date();
-    d.setDate(d.getDate() - 6);
-    const from = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const from = firstOfMonthIso();
 
     Promise.all([
       api.get('/api/reports/print-summary', { from, to }),
@@ -83,7 +82,11 @@ const PrintDashboard = () => {
   const activeQueue = (data.queue?.by_status?.queued || 0)
     + (data.queue?.by_status?.processing || 0)
     + (data.queue?.by_status?.ready || 0);
-  const maxTrend = Math.max(...(data.summary?.rows || []).map((t) => t.grand_total), 1);
+  const printTrend = zeroFillDailySeries(
+    data.summary?.rows || [],
+    data.summary?.from || firstOfMonthIso(),
+    data.summary?.to || data.today
+  );
 
   return (
     <div>
@@ -125,23 +128,12 @@ const PrintDashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card title="Pendapatan 7 Hari" className="lg:col-span-2">
-          {!data.summary?.rows?.length ? (
-            <p className="text-sm text-slate-500 py-8 text-center">Belum ada penjualan jasa</p>
-          ) : (
-            <div className="flex items-end gap-2 h-48">
-              {data.summary.rows.slice().reverse().map((item) => (
-                <div key={item.date} className="flex-1 flex flex-col items-center gap-2">
-                  <div className="text-xs text-slate-400">{formatCurrency(item.grand_total).replace('Rp', '')}</div>
-                  <div
-                    className="w-full bg-gradient-to-t from-ios-purple to-ios-blue rounded-t"
-                    style={{ height: `${Math.max(4, (item.grand_total / maxTrend) * 140)}px` }}
-                  />
-                  <div className="text-xs text-slate-500">{item.date.slice(8)}/{item.date.slice(5, 7)}</div>
-                </div>
-              ))}
-            </div>
-          )}
+        <Card
+          title="Pendapatan Bulan Ini"
+          className="lg:col-span-2 flex flex-col"
+          bodyClassName="flex-1 min-h-48 flex flex-col"
+        >
+          <TrendLineChart data={printTrend} emptyLabel="Belum ada penjualan jasa" />
         </Card>
 
         <div className="space-y-5">
@@ -202,8 +194,6 @@ const MinimarketDashboard = () => {
 
   if (loading) return <Spinner label="Memuat dashboard..." />;
   if (!data) return null;
-
-  const maxTrend = Math.max(...data.trend.map((t) => t.grand_total), 1);
 
   // Halaman tujuan KPI masing-masing punya izinnya sendiri; sembunyikan tautan
   // bila user tidak punya izin halaman tersebut.
@@ -302,23 +292,12 @@ const MinimarketDashboard = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Card title="Tren Penjualan 7 Hari" className="lg:col-span-2">
-          {data.trend.length === 0 ? (
-            <p className="text-sm text-slate-500 py-8 text-center">Belum ada data penjualan</p>
-          ) : (
-            <div className="flex items-end gap-2 h-48">
-              {data.trend.map((item) => (
-                <div key={item.date} className="flex-1 flex flex-col items-center gap-2">
-                  <div className="text-xs text-slate-400">{formatCurrency(item.grand_total).replace('Rp', '')}</div>
-                  <div
-                    className="w-full bg-gradient-to-t from-ios-blue to-ios-cyan rounded-t"
-                    style={{ height: `${Math.max(4, (item.grand_total / maxTrend) * 140)}px` }}
-                  />
-                  <div className="text-xs text-slate-500">{item.date.slice(8)}/{item.date.slice(5, 7)}</div>
-                </div>
-              ))}
-            </div>
-          )}
+        <Card
+          title="Tren Penjualan Bulan Ini"
+          className="lg:col-span-2 flex flex-col"
+          bodyClassName="flex-1 min-h-48 flex flex-col"
+        >
+          <TrendLineChart data={data.trend} />
         </Card>
 
         <div className="space-y-5">
