@@ -942,4 +942,19 @@ CREATE INDEX IF NOT EXISTS idx_stock_opnames_business ON stock_opnames (business
 -- Antrian fotokopi aktif (skip business tak dipakai karena tabel khusus fotokopi).
 CREATE INDEX IF NOT EXISTS idx_print_orders_queue_active
     ON print_orders (business, status, queue_no DESC NULLS LAST, id DESC);
+
+-- =========================================================
+-- Cache insight AI laporan bulanan (kenari.id)
+-- =========================================================
+-- Satu narasi per (usaha, periode); tombol Regenerate memaksa refresh=1.
+CREATE TABLE IF NOT EXISTS report_insights (
+    id SERIAL PRIMARY KEY,
+    business VARCHAR(20) NOT NULL,
+    from_date DATE NOT NULL,
+    to_date DATE NOT NULL,
+    content TEXT NOT NULL,
+    model VARCHAR(80),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (business, from_date, to_date)
+);
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale_product ON sale_items (sale_id, product_id);

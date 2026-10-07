@@ -49,6 +49,11 @@ services:
       GUDANG_USERNAME: ${GUDANG_USERNAME:-}
       GUDANG_PASSWORD: ${GUDANG_PASSWORD:-}
       GUDANG_FULL_NAME: ${GUDANG_FULL_NAME:-Petugas Gudang}
+      # Insight AI laporan bulanan (kenari.id, OpenAI-compatible).
+      # KENARI_API_KEY hanya diisi lewat .env host (gitignored); jangan commit key.
+      KENARI_API_KEY: ${KENARI_API_KEY:-}
+      KENARI_BASE_URL: ${KENARI_BASE_URL:-https://kenari.id/v1}
+      KENARI_MODEL: ${KENARI_MODEL:-mimo-v2-6-flash:free}
     volumes:
       - ./backend/uploads:/app/uploads
     depends_on:

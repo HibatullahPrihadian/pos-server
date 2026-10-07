@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Printer, Wallet, ClipboardList, CheckCircle2, Clock, PackageCheck, XCircle, Download,
+  FileDown, RefreshCw,
 } from 'lucide-react';
 import { api, downloadFile } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
+import { useSettings } from '../context/SettingsContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
@@ -11,6 +14,8 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Badge from '../components/ui/Badge';
 import Spinner from '../components/ui/Spinner';
+import Modal from '../components/ui/Modal';
+import MonthlyReportPrint from '../components/reports/MonthlyReportPrint';
 import { formatCurrency, todayIso, firstOfMonthIso } from '../utils/formatters';
 
 const STATUS_CARDS = [
@@ -23,11 +28,26 @@ const STATUS_CARDS = [
 
 const PrintReports = () => {
   const toast = useToastContext();
+  const { settings } = useSettings();
   const [range, setRange] = useState({ from: firstOfMonthIso(), to: todayIso() });
   const [summary, setSummary] = useState(null);
   const [top, setTop] = useState(null);
   const [queue, setQueue] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Pratinjau laporan bulanan A4 (window.print -> "Save as PDF").
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfReport, setPdfReport] = useState(null);
+  const [pdfInsight, setPdfInsight] = useState(null);
+  const [insightLoading, setInsightLoading] = useState(false);
+
+  // Saat pratinjau terbuka, @media print menyembunyikan #root; portal
+  // #report-print-area (di luar #root) tetap tercetak.
+  useEffect(() => {
+    document.body.classList.toggle('report-printing', pdfOpen);
+    return () => document.body.classList.remove('report-printing');
+  }, [pdfOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +79,60 @@ const PrintReports = () => {
     }
   };
 
+  // Insight AI laporan bulanan (kenari.id). Gagal = catatan fallback di dokumen.
+  const loadPdfInsight = async (refresh = false) => {
+    setInsightLoading(true);
+    setPdfInsight(null);
+    try {
+      const params = { ...range };
+      if (refresh) params.refresh = 1;
+      setPdfInsight(await api.get('/api/reports/print-monthly-insight', params));
+    } catch (err) {
+      setPdfInsight({ content: null, cached: false, reason: 'ai_unavailable' });
+      if (refresh) toast.error(err.message);
+    } finally {
+      setInsightLoading(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    setPdfOpen(true);
+    setPdfLoading(true);
+    setPdfReport(null);
+    setPdfInsight(null);
+    loadPdfInsight(false);
+    try {
+      const [s, t] = await Promise.all([
+        api.get('/api/reports/print-summary', range),
+        api.get('/api/reports/print-top-services', { ...range, limit: 10 }),
+      ]);
+      const totals = s.totals || {};
+      const avgPerOrder = totals.order_count > 0
+        ? Math.round(totals.grand_total / totals.order_count)
+        : 0;
+      const topService = (t.rows || [])[0];
+      setPdfReport({
+        from: s.from,
+        to: s.to,
+        generated_at: new Date().toISOString(),
+        kpis: [
+          { label: 'Pendapatan', value: formatCurrency(totals.grand_total) },
+          { label: 'Pesanan Lunas', value: totals.order_count ?? 0 },
+          { label: 'Rata-rata / Pesanan', value: formatCurrency(avgPerOrder) },
+          { label: 'Jasa Teratas', value: topService ? topService.service_name : '-' },
+        ],
+        daily: s.rows,
+        services: t.rows || [],
+        totals,
+      });
+    } catch (err) {
+      toast.error(err.message);
+      setPdfOpen(false);
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
   if (loading && !summary) return <Spinner label="Memuat laporan fotokopi..." />;
 
   const totals = summary?.totals || { order_count: 0, grand_total: 0, tax_total: 0 };
@@ -69,9 +143,14 @@ const PrintReports = () => {
         title="Laporan Fotokopi"
         subtitle="Penjualan jasa, layanan terpopuler, dan status antrian"
         actions={(
-          <Button variant="neutral" onClick={exportCsv}>
-            <Download size={16} /> Unduh CSV
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="neutral" onClick={exportPdf}>
+              <FileDown size={16} /> Export PDF
+            </Button>
+            <Button variant="neutral" onClick={exportCsv}>
+              <Download size={16} /> Unduh CSV
+            </Button>
+          </div>
         )}
       />
 
@@ -193,6 +272,61 @@ const PrintReports = () => {
           </Card>
         </div>
       </div>
+
+      {/* Modal pratinjau laporan bulanan A4 + tombol cetak/simpan PDF */}
+      <Modal
+        isOpen={pdfOpen}
+        onClose={() => setPdfOpen(false)}
+        title="Pratinjau Laporan Bulanan Fotokopi"
+        size="xl"
+        footer={(
+          <div className="flex justify-between items-center gap-2">
+            <Button
+              variant="neutral"
+              onClick={() => loadPdfInsight(true)}
+              disabled={pdfLoading || insightLoading || !pdfReport}
+            >
+              <RefreshCw size={16} /> {insightLoading ? 'Membuat ulang...' : 'Regenerate Insight'}
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="neutral" onClick={() => setPdfOpen(false)}>Tutup</Button>
+              <Button
+                variant="primary"
+                onClick={() => window.print()}
+                disabled={pdfLoading || !pdfReport}
+              >
+                <Printer size={16} /> Cetak / Simpan PDF
+              </Button>
+            </div>
+          </div>
+        )}
+      >
+        {pdfLoading || !pdfReport ? (
+          <p className="text-sm text-slate-400 py-8 text-center">Memuat laporan...</p>
+        ) : (
+          <div className="flex justify-center p-2 bg-slate-950/40 rounded-ios-sm overflow-x-auto">
+            <MonthlyReportPrint
+              business="fotokopi"
+              report={pdfReport}
+              settings={settings}
+              insight={pdfInsight}
+              onRegenerate={insightLoading ? undefined : () => loadPdfInsight(true)}
+            />
+          </div>
+        )}
+      </Modal>
+
+      {/* Area cetak: portal ke body agar bebas dari ancestor fixed/transform modal. */}
+      {pdfOpen && pdfReport && createPortal(
+        <MonthlyReportPrint
+          business="fotokopi"
+          report={pdfReport}
+          settings={settings}
+          insight={pdfInsight}
+          print
+        />,
+        document.body,
+      )}
     </div>
   );
 };

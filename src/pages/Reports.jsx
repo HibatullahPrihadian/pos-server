@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Download, BarChart3 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Download, BarChart3, FileDown, Printer, RefreshCw } from 'lucide-react';
 import { api, downloadFile } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
+import { useSettings } from '../context/SettingsContext';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
+import Modal from '../components/ui/Modal';
+import MonthlyReportPrint from '../components/reports/MonthlyReportPrint';
 import useDebounce from '../hooks/useDebounce';
 import { formatCurrency, formatDate, todayIso, firstOfMonthIso } from '../utils/formatters';
 import { PAYMENT_LABELS, PO_STATUS_LABELS } from '../utils/labels';
@@ -26,6 +30,7 @@ const TABS = [
 
 const Reports = () => {
   const toast = useToastContext();
+  const { settings } = useSettings();
   const [searchParams, setSearchParams] = useSearchParams();
   const paramTab = searchParams.get('tab');
   const [tab, setTab] = useState(() => (TABS.some((t) => t.key === paramTab) ? paramTab : 'sales-summary'));
@@ -41,6 +46,13 @@ const Reports = () => {
   const [supplierId, setSupplierId] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const search = useDebounce(searchInput, 350);
+
+  // Pratinjau laporan bulanan A4 (window.print -> "Save as PDF").
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfReport, setPdfReport] = useState(null);
+  const [pdfInsight, setPdfInsight] = useState(null);
+  const [insightLoading, setInsightLoading] = useState(false);
 
   const requestIdRef = useRef(0);
   const abortRef = useRef(null);
@@ -90,6 +102,13 @@ const Reports = () => {
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
+  // Saat pratinjau laporan terbuka, tandai body agar @media print menyembunyikan
+  // #root; portal #report-print-area (di luar #root) tetap tercetak.
+  useEffect(() => {
+    document.body.classList.toggle('report-printing', pdfOpen);
+    return () => document.body.classList.remove('report-printing');
+  }, [pdfOpen]);
+
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
@@ -128,6 +147,71 @@ const Reports = () => {
       toast.success('CSV diunduh');
     } catch (err) {
       toast.error(err.message);
+    }
+  };
+
+  // Insight AI laporan bulanan (kenari.id). Gagal = tampil catatan fallback di
+  // dokumen; laporan lain tetap normal. refresh=1 memaksa regenerate (cache).
+  const loadPdfInsight = async (refresh = false) => {
+    setInsightLoading(true);
+    setPdfInsight(null);
+    try {
+      const params = { from: range.from, to: range.to };
+      if (refresh) params.refresh = 1;
+      setPdfInsight(await api.get('/api/reports/monthly-insight', params));
+    } catch (err) {
+      setPdfInsight({ content: null, cached: false, reason: 'ai_unavailable' });
+      if (refresh) toast.error(err.message);
+    } finally {
+      setInsightLoading(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    setPdfOpen(true);
+    setPdfLoading(true);
+    setPdfReport(null);
+    setPdfInsight(null);
+    // Insight diambil paralel: modal terbuka begitu data laporan siap, insight
+    // menyusul (bisa lambat pada muat pertama; berikutnya dari cache).
+    loadPdfInsight(false);
+    try {
+      const params = { from: range.from, to: range.to };
+      const [sales, profitLoss, byPayment, topProducts] = await Promise.all([
+        api.get('/api/reports/sales-summary', params),
+        api.get('/api/reports/profit-loss', params),
+        api.get('/api/reports/by-payment', params),
+        api.get('/api/reports/top-products', { ...params, limit: 10 }),
+      ]);
+      const pl = profitLoss.summary || {};
+      setPdfReport({
+        from: sales.from,
+        to: sales.to,
+        generated_at: new Date().toISOString(),
+        kpis: [
+          { label: 'Penjualan', value: formatCurrency(sales.totals.grand_total) },
+          { label: 'Transaksi', value: sales.totals.txn_count },
+          { label: 'PPN (incl.)', value: formatCurrency(sales.totals.tax_total) },
+          { label: 'Laba Kotor', value: formatCurrency(pl.gross_profit) },
+          {
+            label: 'Laba Bersih',
+            value: formatCurrency(pl.net_profit),
+            tone: Number(pl.net_profit) < 0 ? 'neg' : 'pos',
+          },
+          { label: 'Retur', value: formatCurrency(sales.totals.refund_total) },
+        ],
+        daily: sales.rows,
+        profitLoss: pl,
+        expenseByCategory: profitLoss.expense_by_category || [],
+        payments: byPayment.rows || [],
+        topProducts: topProducts.rows || [],
+        totals: sales.totals,
+      });
+    } catch (err) {
+      toast.error(err.message);
+      setPdfOpen(false);
+    } finally {
+      setPdfLoading(false);
     }
   };
 
@@ -487,7 +571,12 @@ const Reports = () => {
       <PageHeader
         title="Laporan"
         subtitle="Analisis penjualan, laba, dan stok dengan ekspor CSV"
-        actions={<Button variant="neutral" onClick={exportCsv}><Download size={16} /> Ekspor CSV</Button>}
+        actions={(
+          <div className="flex gap-2">
+            <Button variant="neutral" onClick={exportPdf}><FileDown size={16} /> Export PDF</Button>
+            <Button variant="neutral" onClick={exportCsv}><Download size={16} /> Ekspor CSV</Button>
+          </div>
+        )}
       />
 
       <div className="flex flex-wrap gap-2 mb-5">
@@ -564,6 +653,61 @@ const Reports = () => {
           )}
         </div>
       </Card>
+
+      {/* Modal pratinjau laporan bulanan A4 + tombol cetak/simpan PDF */}
+      <Modal
+        isOpen={pdfOpen}
+        onClose={() => setPdfOpen(false)}
+        title="Pratinjau Laporan Bulanan"
+        size="xl"
+        footer={(
+          <div className="flex justify-between items-center gap-2">
+            <Button
+              variant="neutral"
+              onClick={() => loadPdfInsight(true)}
+              disabled={pdfLoading || insightLoading || !pdfReport}
+            >
+              <RefreshCw size={16} /> {insightLoading ? 'Membuat ulang...' : 'Regenerate Insight'}
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="neutral" onClick={() => setPdfOpen(false)}>Tutup</Button>
+              <Button
+                variant="primary"
+                onClick={() => window.print()}
+                disabled={pdfLoading || !pdfReport}
+              >
+                <Printer size={16} /> Cetak / Simpan PDF
+              </Button>
+            </div>
+          </div>
+        )}
+      >
+        {pdfLoading || !pdfReport ? (
+          <p className="text-sm text-slate-400 py-8 text-center">Memuat laporan...</p>
+        ) : (
+          <div className="flex justify-center p-2 bg-slate-950/40 rounded-ios-sm overflow-x-auto">
+            <MonthlyReportPrint
+              business="minimarket"
+              report={pdfReport}
+              settings={settings}
+              insight={pdfInsight}
+              onRegenerate={insightLoading ? undefined : () => loadPdfInsight(true)}
+            />
+          </div>
+        )}
+      </Modal>
+
+      {/* Area cetak: portal ke body agar bebas dari ancestor fixed/transform modal. */}
+      {pdfOpen && pdfReport && createPortal(
+        <MonthlyReportPrint
+          business="minimarket"
+          report={pdfReport}
+          settings={settings}
+          insight={pdfInsight}
+          print
+        />,
+        document.body,
+      )}
     </div>
   );
 };

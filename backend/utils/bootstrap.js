@@ -111,4 +111,32 @@ const ensureInitialUsers = async (attempts = 10) => {
   return { created, generated };
 };
 
-module.exports = { ensureInitialUsers };
+// Tabel cache insight laporan dibuat saat start agar volume DB lama (yang
+// hanya menjalankan init.sql pada init pertama) ikut punya tabelnya. Idempoten.
+const ensureReportInsightsTable = async (attempts = 10) => {
+  const sql = `
+    CREATE TABLE IF NOT EXISTS report_insights (
+      id SERIAL PRIMARY KEY,
+      business VARCHAR(20) NOT NULL,
+      from_date DATE NOT NULL,
+      to_date DATE NOT NULL,
+      content TEXT NOT NULL,
+      model VARCHAR(80),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      UNIQUE (business, from_date, to_date)
+    )
+  `;
+  let lastError;
+  for (let i = 1; i <= attempts; i += 1) {
+    try {
+      await pool.query(sql);
+      return true;
+    } catch (err) {
+      lastError = err;
+      if (i < attempts) await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  throw lastError;
+};
+
+module.exports = { ensureInitialUsers, ensureReportInsightsTable };

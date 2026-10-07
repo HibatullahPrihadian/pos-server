@@ -154,6 +154,37 @@ input[type='number'] {
   #invoice-print-area .invoice-accent-bar {
     margin: -14mm -15mm 5mm -15mm;
   }
+
+  /* Laporan bulanan A4: hanya area laporan yang tercetak. */
+  #report-print-area,
+  #report-print-area * {
+    visibility: visible !important;
+  }
+
+  #report-print-area {
+    display: block !important;
+    width: 210mm;
+    min-height: 0;
+    margin: 0;
+    padding: 14mm 15mm;
+    background: #ffffff;
+  }
+
+  #report-print-area,
+  #report-print-area * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Portal #report-print-area ada di luar #root; sembunyikan aplikasi agar
+     tidak menyisakan halaman kosong (kelas hanya aktif saat pratinjau terbuka). */
+  body.report-printing #root {
+    display: none !important;
+  }
+
+  #report-print-area .report-accent-bar {
+    margin: -14mm -15mm 5mm -15mm;
+  }
 }
 
 /* Lembar cetak disembunyikan di layar; bukan position:fixed agar tidak
@@ -518,6 +549,384 @@ input[type='number'] {
   font-size: 10px;
   color: #94a3b8;
   text-align: center;
+}
+
+/* =========================================================
+   Laporan bulanan A4 (pratinjau & cetak) — gaya mengikuti invoice.
+   ========================================================= */
+.report-sheet-print {
+  display: none;
+}
+
+.report-sheet {
+  position: relative;
+  box-sizing: border-box;
+  width: 210mm;
+  min-height: 297mm;
+  padding: 14mm 15mm;
+  background: #ffffff;
+  color: #0f172a;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.report-accent-bar {
+  display: flex;
+  height: 6px;
+  margin: -14mm -15mm 5mm -15mm;
+  overflow: hidden;
+  border-radius: 0 0 2px 2px;
+}
+
+.report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  border-bottom: 2px solid #e2e8f0;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.report-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.report-brand-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: #0a84ff;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.report-store-name {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #0f172a;
+}
+
+.report-store-tagline {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #0a84ff;
+  margin-top: 2px;
+}
+
+.report-store-meta {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 10px;
+}
+
+.report-store-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.report-store-line svg {
+  color: #94a3b8;
+  flex-shrink: 0;
+}
+
+.report-title {
+  text-align: right;
+}
+
+.report-title-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+}
+
+.report-period {
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 6px;
+}
+
+.report-muted {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.report-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #94a3b8;
+  margin-bottom: 3px;
+}
+
+.report-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.report-kpi {
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.report-kpi-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #94a3b8;
+}
+
+.report-kpi-value {
+  margin-top: 3px;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.report-kpi-value.report-pos { color: #047857; }
+.report-kpi-value.report-neg { color: #b00020; }
+
+.report-insight {
+  box-sizing: border-box;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.report-insight-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.report-insight-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #0a84ff;
+}
+
+.report-insight-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.report-insight-body p {
+  margin: 0 0 4px;
+  color: #1e293b;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.report-insight-body p:last-child {
+  margin-bottom: 0;
+}
+
+.report-insight-note,
+.report-insight-loading {
+  color: #475569;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.report-section {
+  margin-top: 14px;
+}
+
+.report-section-title {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: #0f172a;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 4px;
+  margin-bottom: 8px;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+}
+
+.report-table th,
+.report-table td {
+  border: 1px solid #e2e8f0;
+  padding: 5px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-table th {
+  background: #0f172a;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.report-table tbody tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.report-num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.report-empty {
+  text-align: center;
+  color: #94a3b8;
+}
+
+.report-strong {
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.report-muted-cell {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.report-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.report-total-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  color: #334155;
+}
+
+.report-grand {
+  margin-top: 5px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.report-pos-text { color: #047857; }
+.report-neg-text { color: #b00020; }
+
+.report-recap {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 14px;
+}
+
+.report-recap-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.report-terbilang {
+  margin-bottom: 10px;
+}
+
+.report-terbilang-text {
+  font-style: italic;
+  color: #334155;
+}
+
+.report-note {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 10px;
+}
+
+.report-totals {
+  width: 72mm;
+  flex-shrink: 0;
+}
+
+.report-sign {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 26px;
+  gap: 40px;
+}
+
+.report-sign-col {
+  text-align: center;
+  min-width: 55mm;
+}
+
+.report-sign-space {
+  height: 46px;
+}
+
+.report-sign-line {
+  font-size: 10px;
+  color: #475569;
+}
+
+.report-footer {
+  margin-top: 20px;
+  border-top: 1px dashed #cbd5e1;
+  padding-top: 6px;
+  font-size: 10px;
+  color: #94a3b8;
+  text-align: center;
+}
+
+/* Sebagian seksi ringkas tidak dipecah antar halaman; tabel harian panjang
+   dibiarkan (laporan boleh > 1 halaman A4). */
+.report-kpi-strip,
+.report-insight,
+.report-recap,
+.report-sign {
+  break-inside: avoid;
 }
 
 /* Grid label barcode untuk pratinjau & cetak (40x30mm default). */

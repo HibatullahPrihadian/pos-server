@@ -2,10 +2,11 @@ const express = require('express');
 const pool = require('../db');
 const { verifyJwt, requirePermission } = require('../middleware/auth');
 const { HttpError } = require('../middleware/error');
-const { isValidDate } = require('../utils/validate');
+const { isValidDate, toBool } = require('../utils/validate');
 const { toInt } = require('../utils/pagination');
 const { sendCsv } = require('../utils/csv');
 const { getReceivableSummary } = require('../utils/receivables');
+const { getMonthlyInsight } = require('../utils/monthlyInsight');
 
 const router = express.Router();
 
@@ -102,6 +103,23 @@ router.get('/print-top-services', requirePermission('print.report', 'report.view
   }
 });
 
+// Insight AI laporan bulanan fotokopi: cache per periode (report_insights),
+// refresh=1 memaksa regenerate. Kegagalan AI = content null (HTTP 200).
+router.get('/print-monthly-insight', requirePermission('print.report', 'report.view'), async (req, res, next) => {
+  try {
+    const { from, to } = resolveRange(req.query);
+    const result = await getMonthlyInsight({
+      business: 'fotokopi',
+      from,
+      to,
+      refresh: toBool(req.query.refresh),
+    });
+    res.json({ from, to, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.get('/print-queue-stats', requirePermission('print.report', 'print.use', 'report.view'), async (req, res, next) => {
   try {
     const { from, to } = resolveRange(req.query);
@@ -137,6 +155,24 @@ router.get('/print-queue-stats', requirePermission('print.report', 'print.use', 
 // Sisanya adalah laporan minimarket (butuh report.view).
 router.use(requirePermission('report.view'));
 
+// Insight AI laporan bulanan (minimarket / usaha aktif via header X-Business).
+// Cache per periode di report_insights; refresh=1 memaksa regenerate.
+// Kegagalan AI = { content: null, reason: 'ai_unavailable' } (HTTP 200).
+router.get('/monthly-insight', async (req, res, next) => {
+  try {
+    const { from, to } = resolveRange(req.query);
+    const result = await getMonthlyInsight({
+      business: req.business,
+      from,
+      to,
+      refresh: toBool(req.query.refresh),
+    });
+    res.json({ from, to, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Zona waktu toko untuk "hari ini"/"bulan ini" pada pembelian. purchases.date diisi
 // dari tanggal lokal klien (WIB), sedangkan sesi DB berjalan di UTC — pin zona waktu
 // agar batas hari tidak bergeser. Dapat dioverride lewat env APP_TIMEZONE.
@@ -158,6 +194,35 @@ const resolveRange = (query) => {
   const from = isValidDate(query.from) ? query.from : toIso(defaultFrom);
   const to = isValidDate(query.to) ? query.to : toIso(today);
   return { from, to };
+};
+
+// Isi titik harian yang hilang dengan 0 antara from..to ('YYYY-MM-DD').
+// Dipakai chart tren dashboard; print-summary TIDAK di-zero-fill di sini
+// karena tabel/CSV PrintReports harus tetap sparse.
+const zeroFillDailySeries = (rows, from, to) => {
+  const byDate = new Map(rows.map((r) => [r.date, r]));
+  const out = [];
+  const cursor = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T00:00:00`);
+  while (cursor <= end) {
+    const iso = toIso(cursor);
+    const existing = byDate.get(iso);
+    out.push(
+      existing
+        ? { ...existing, date: iso, grand_total: Number(existing.grand_total) || 0 }
+        : { date: iso, grand_total: 0 }
+    );
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+};
+
+// Window tren dashboard: bulan berjalan (tanggal 1) → hari ini,
+// sejajar filter DATE_TRUNC('month', CURRENT_DATE) di query KPI.
+const currentMonthTrendRange = () => {
+  const today = new Date();
+  const from = new Date(today.getFullYear(), today.getMonth(), 1);
+  return { from: toIso(from), to: toIso(today) };
 };
 
 const wantsCsv = (query) => String(query.format || '').toLowerCase() === 'csv';
@@ -753,10 +818,11 @@ const summarizeBusiness = async (business) => {
   const trend = await pool.query(
     `SELECT created_at::date AS date, COALESCE(SUM(grand_total), 0)::bigint AS grand_total
      FROM sales
-     WHERE business = $1 AND status = 'completed' AND created_at >= CURRENT_DATE - INTERVAL '6 days'
+     WHERE business = $1 AND status = 'completed' AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
      GROUP BY created_at::date ORDER BY created_at::date`,
     [business]
   );
+  const trendRange = currentMonthTrendRange();
 
   return {
     business,
@@ -769,7 +835,11 @@ const summarizeBusiness = async (business) => {
       txn_count: month.rows[0].txn_count,
     },
     open_shifts: openShifts.rows[0].n,
-    trend: trend.rows.map((r) => ({ date: toIso(r.date), grand_total: Number(r.grand_total) })),
+    trend: zeroFillDailySeries(
+      trend.rows.map((r) => ({ date: toIso(r.date), grand_total: Number(r.grand_total) })),
+      trendRange.from,
+      trendRange.to
+    ),
   };
 };
 
@@ -807,7 +877,9 @@ router.get('/overview', requirePermission('report.view'), async (req, res, next)
       { today_grand_total: 0, today_txn_count: 0, month_grand_total: 0, month_txn_count: 0 }
     );
 
-    // Tren gabungan 7 hari: jumlahkan grand_total per tanggal dari kedua usaha.
+    // Tren gabungan bulan berjalan: jumlahkan grand_total per tanggal dari kedua
+    // usaha. Kedua usaha sudah di-zero-fill ke window yang sama, jadi merge
+    // otomatis kontinu.
     const trendMap = new Map();
     perBusiness.forEach((b) => {
       b.trend.forEach((point) => {
@@ -925,10 +997,11 @@ router.get('/dashboard', async (req, res, next) => {
     const salesTrend = await pool.query(
       `SELECT created_at::date AS date, COALESCE(SUM(grand_total), 0)::bigint AS grand_total
        FROM sales
-       WHERE business = $1 AND status = 'completed' AND created_at >= CURRENT_DATE - INTERVAL '6 days'
+       WHERE business = $1 AND status = 'completed' AND created_at >= DATE_TRUNC('month', CURRENT_DATE)
        GROUP BY created_at::date ORDER BY created_at::date`,
       [business]
     );
+    const trendRange = currentMonthTrendRange();
 
     // Modal pembelian lunas (informatif). Kriteria & rentang sama dengan tab Laporan "Modal"
     // (from = awal bulan, to = hari ini). purchases.date ditulis dari tanggal lokal klien,
@@ -990,10 +1063,14 @@ router.get('/dashboard', async (req, res, next) => {
         overdue_total: receivable.overdue_total,
         overdue_count: receivable.overdue_count,
       },
-      trend: salesTrend.rows.map((r) => ({
-        date: toIso(r.date),
-        grand_total: Number(r.grand_total),
-      })),
+      trend: zeroFillDailySeries(
+        salesTrend.rows.map((r) => ({
+          date: toIso(r.date),
+          grand_total: Number(r.grand_total),
+        })),
+        trendRange.from,
+        trendRange.to
+      ),
     });
   } catch (err) {
     next(err);

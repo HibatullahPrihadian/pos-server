@@ -207,6 +207,14 @@ const start = async () => {
     console.error('Gagal menyiapkan akun awal:', err.message);
   }
 
+  // Tabel cache insight laporan (fitur opsional): gagal = lanjut start, endpoint
+  // insight melaporkan error sendiri.
+  try {
+    await require('./utils/bootstrap').ensureReportInsightsTable();
+  } catch (err) {
+    console.error('Gagal membuat tabel report_insights:', err.message);
+  }
+
   app.listen(PORT, () => {
     console.log(`POS backend berjalan di port ${PORT}`);
     console.log(`Upload dir: ${path.resolve(uploadRoot)}`);

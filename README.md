@@ -133,6 +133,11 @@ Akses:
 
 `APP_TIMEZONE` (default `Asia/Jakarta`) menentukan zona waktu toko untuk batas "hari ini"/"bulan ini" pada KPI dan laporan.
 
+**Insight AI laporan bulanan** (opsional) memakai API kenari.id. Isi di `.env` (jangan commit):
+`KENARI_API_KEY` (wajib terisi agar insight terhasilkan), `KENARI_BASE_URL` (default `https://kenari.id/v1`),
+`KENARI_MODEL` (default `mimo-v2-6-flash:free`). Tanpa key, laporan tetap tercetak — kotak insight
+menampilkan catatan "tidak tersedia".
+
 ### HTTPS untuk kamera (wajib untuk scan via HP)
 
 Fitur scan barcode memakai kamera perangkat (`getUserMedia`). Browser **hanya**
