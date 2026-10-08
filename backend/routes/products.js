@@ -83,6 +83,11 @@ const validateProductBody = (body, { partial = false } = {}) => {
     const cid = toInt(body.consignor_id, 0);
     value.consignor_id = cid > 0 ? cid : null;
   }
+  // Penitip & konsinyasi harus konsisten: konsinyasi wajib punya penitip, non-konsinyasi tanpa penitip.
+  if (value.is_consignment === true && value.consignor_id === null) {
+    return { error: 'Penitip wajib dipilih untuk produk konsinyasi' };
+  }
+  if (value.is_consignment === false) value.consignor_id = null;
   if ('is_active' in body) value.is_active = toBool(body.is_active, true);
 
   return { value };
@@ -320,6 +325,20 @@ router.put('/:id', requirePermission('product.manage'), async (req, res, next) =
 
     const keys = Object.keys(value);
     if (keys.length === 0) throw new HttpError(400, 'Tidak ada perubahan');
+
+    // Cek konsistensi konsinyasi<->penitip pada state hasil merge (PUT parsial).
+    if (value.is_consignment !== undefined || value.consignor_id !== undefined) {
+      const current = await pool.query(
+        'SELECT is_consignment, consignor_id FROM products WHERE id = $1 AND business = $2',
+        [req.params.id, req.business]
+      );
+      if (!current.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
+      const nextConsignment = value.is_consignment !== undefined ? value.is_consignment : current.rows[0].is_consignment;
+      const nextConsignor = value.consignor_id !== undefined ? value.consignor_id : current.rows[0].consignor_id;
+      if (nextConsignment === true && (nextConsignor === null || nextConsignor === undefined)) {
+        throw new HttpError(400, 'Penitip wajib dipilih untuk produk konsinyasi');
+      }
+    }
 
     const setClause = keys.map((key, i) => `${key} = $${i + 1}`).join(', ');
     const values = keys.map((key) => (key === 'barcode' || key === 'member_price' ? value[key] ?? null : value[key]));

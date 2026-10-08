@@ -113,7 +113,7 @@ const Consignment = () => {
 
   const openEdit = (c) => {
     setEditing(c);
-    setForm({ name: c.name, phone: c.phone || '', address: c.address || '', note: c.note || '' });
+    setForm({ name: c.consignor_name, phone: c.phone || '', address: c.address || '', note: c.note || '' });
     setModalOpen(true);
   };
 
@@ -121,7 +121,7 @@ const Consignment = () => {
     setSaving(true);
     try {
       if (editing) {
-        await api.put(`/api/consignment/consignors/${editing.id}`, form);
+        await api.put(`/api/consignment/consignors/${editing.consignor_id}`, form);
         toast.success('Penitip diperbarui');
       } else {
         await api.post('/api/consignment/consignors', form);
@@ -138,7 +138,7 @@ const Consignment = () => {
 
   const handleDelete = async () => {
     try {
-      const res = await api.del(`/api/consignment/consignors/${confirm.id}`);
+      const res = await api.del(`/api/consignment/consignors/${confirm.consignor_id}`);
       toast.success(res?.message || 'Penitip dihapus');
       setConfirm(null);
       loadConsignors();
@@ -207,8 +207,8 @@ const Consignment = () => {
               empty="Belum ada penitip"
             >
               {consignors.data.map((c) => (
-                <tr key={c.id} className="hover:bg-white/5">
-                  <td className="px-4 py-3 text-white">{c.name}</td>
+                <tr key={c.consignor_id} className="hover:bg-white/5">
+                  <td className="px-4 py-3 text-white">{c.consignor_name}</td>
                   <td className="px-4 py-3 text-slate-400">{c.phone || '-'}</td>
                   <td className="px-4 py-3 text-right text-ios-orange">{formatCurrency(c.payable)}</td>
                   <td className="px-4 py-3 text-center">

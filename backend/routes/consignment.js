@@ -27,7 +27,7 @@ const resolveRange = (query) => {
 //   dikurangi SUM(consignment_payouts.amount).
 // cost_price tersimpan per satuan jual, jadi dikalikan qty (bukan base_qty).
 const PAYABLE_SQL = `
-  SELECT c.id AS consignor_id, c.name AS consignor_name, c.phone,
+  SELECT c.id AS consignor_id, c.name AS consignor_name, c.phone, c.address, c.note, c.is_active,
          COALESCE(sold.qty, 0)::int AS qty_sold,
          COALESCE(sold.payable, 0)::bigint AS sold_value,
          COALESCE(paid.total, 0)::bigint AS paid_total,
@@ -334,6 +334,9 @@ router.post('/payouts', async (req, res, next) => {
     const periodTo = cleanString(req.body?.period_to, 10);
     if (periodFrom && !isValidDate(periodFrom)) throw new HttpError(400, 'period_from tidak valid');
     if (periodTo && !isValidDate(periodTo)) throw new HttpError(400, 'period_to tidak valid');
+    if (periodFrom && periodTo && periodFrom > periodTo) {
+      throw new HttpError(400, 'Periode "dari" tidak boleh melebihi periode "sampai"');
+    }
 
     const created = await withTransaction(async (client) => {
       const consignor = await client.query('SELECT * FROM consignors WHERE id = $1 AND business = $2 FOR UPDATE', [consignorId, req.business]);

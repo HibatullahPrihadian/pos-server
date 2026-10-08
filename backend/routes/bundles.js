@@ -73,14 +73,17 @@ const normalizeItems = (rawItems) => {
 };
 
 // Pastikan semua produk komponen ada & aktif.
+// Produk konsinyasi ditolak: baris paket di sale_items menyimpan product_id NULL,
+// sehingga hutang ke penitip (dihitung dari products.consignor_id) tidak akan terekap.
 const assertComponentsExist = async (runner, items) => {
   const ids = items.map((i) => i.product_id);
-  const found = await runner.query('SELECT id, name, is_active FROM products WHERE id = ANY($1::int[])', [ids]);
+  const found = await runner.query('SELECT id, name, is_active, is_consignment FROM products WHERE id = ANY($1::int[])', [ids]);
   const map = new Map(found.rows.map((r) => [r.id, r]));
   for (const item of items) {
     const product = map.get(item.product_id);
     if (!product) throw new HttpError(404, `Produk komponen #${item.product_id} tidak ditemukan`);
     if (!product.is_active) throw new HttpError(400, `Produk komponen ${product.name} tidak aktif`);
+    if (product.is_consignment) throw new HttpError(400, `Produk titipan ${product.name} tidak bisa jadi komponen paket (hutang penitip tidak dapat direkap)`);
   }
 };
 
