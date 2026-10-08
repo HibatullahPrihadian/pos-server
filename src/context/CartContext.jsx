@@ -122,6 +122,19 @@ const CartProvider = ({ children }) => {
     setRedeemPoints(0);
   }, []);
 
+  // Hidrasi ulang keranjang dari snapshot hold/resume. Item di-deep-copy agar
+  // tidak berbagi referensi dengan state lama. Harga dianggap display-only —
+  // quote effect + checkout server tetap penentu akhir.
+  const restore = useCallback((snapshot) => {
+    const nextItems = Array.isArray(snapshot?.items)
+      ? snapshot.items.map((i) => ({ ...i }))
+      : [];
+    setItems(nextItems);
+    setMember(snapshot?.member || null);
+    setTxnDiscount(Math.max(0, Number(snapshot?.txnDiscount) || 0));
+    setRedeemPoints(Math.max(0, Math.round(Number(snapshot?.redeemPoints) || 0)));
+  }, []);
+
   const totals = useMemo(() => {
     const subtotal = items.reduce((sum, i) => sum + i.price * i.qty, 0);
     const itemDiscount = items.reduce((sum, i) => sum + i.discount, 0);
@@ -149,6 +162,7 @@ const CartProvider = ({ children }) => {
     removeItemByKey,
     keyOf,
     clear,
+    restore,
     totals,
   };
 

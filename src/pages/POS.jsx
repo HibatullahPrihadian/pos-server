@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Search, Plus, Minus, Trash2, ScanLine, ShoppingCart, UserPlus, X,
   Banknote, QrCode, CreditCard, Landmark, Printer, CheckCircle2, Coins,
-  Percent, Building2,
+  Percent, Building2, PauseCircle, ListChecks,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -15,6 +15,7 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
 import Receipt from '../components/receipt/Receipt';
 import BarcodeScannerModal from '../components/scanner/BarcodeScannerModal';
 import CameraScanButton from '../components/scanner/CameraScanButton';
@@ -54,6 +55,8 @@ const POS = () => {
   const barcodeRef = useRef(null);
   const searchRef = useRef(null);
   const dropdownRef = useRef(null);
+  const unitPickerRef = useRef(null);
+  const payRef = useRef(null);
   const [dropdownRect, setDropdownRect] = useState(null);
 
   const [memberSearch, setMemberSearch] = useState('');
@@ -74,11 +77,65 @@ const POS = () => {
   const [unitPicker, setUnitPicker] = useState(null);
   const [scanOpen, setScanOpen] = useState(false);
   const [discountEditorKey, setDiscountEditorKey] = useState(null);
+  const [selectedItemKey, setSelectedItemKey] = useState(null);
+
+  const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
+  const [unitActiveIndex, setUnitActiveIndex] = useState(0);
+  const [memberActiveIndex, setMemberActiveIndex] = useState(0);
+  const [clearCartOpen, setClearCartOpen] = useState(false);
+
+  const [holdOpen, setHoldOpen] = useState(false);
+  const [holdsOpen, setHoldsOpen] = useState(false);
+  const [holdName, setHoldName] = useState('');
+  const [holdNote, setHoldNote] = useState('');
+  const [holdSaving, setHoldSaving] = useState(false);
+  const [holdsList, setHoldsList] = useState([]);
+  const [holdsLoading, setHoldsLoading] = useState(false);
+  const [holdsError, setHoldsError] = useState(null);
+  const [resumeHolding, setResumeHolding] = useState(null);
+  const [confirmResume, setConfirmResume] = useState(null);
 
   const debouncedSearch = useDebounce(search, 300);
   const debouncedMemberSearch = useDebounce(memberSearch, 300);
 
   const dropdownVisible = searchOpen && debouncedSearch.trim().length > 0;
+
+  // Hasil dropdown untuk navigasi keyboard: urut = paket dulu, lalu produk
+  // (identik dengan urutan render di SearchResults).
+  const searchQuery = debouncedSearch.trim().toLowerCase();
+  const visibleBundles = loadingProducts
+    ? []
+    : bundles.filter((b) => !searchQuery || b.name?.toLowerCase().includes(searchQuery) || b.sku?.toLowerCase().includes(searchQuery));
+  const visibleProducts = products;
+  const searchFlat = [
+    ...visibleBundles.map((b) => ({ kind: 'bundle', item: b })),
+    ...visibleProducts.map((p) => ({ kind: 'product', item: p })),
+  ];
+
+  useEffect(() => {
+    setSearchActiveIndex(searchFlat.length > 0 ? 0 : -1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, products, bundles, loadingProducts]);
+
+  useEffect(() => {
+    setMemberActiveIndex(0);
+  }, [debouncedMemberSearch, memberResults]);
+
+  useEffect(() => {
+    if (unitPicker) {
+      setUnitActiveIndex(0);
+      // Fokus ke wrapper modal agar handler ↑/↓/Enter/1–9 menerima event
+      // keyboard tanpa perlu klik dulu (event bubble dari elemen yang fokus).
+      unitPickerRef.current?.focus();
+    }
+  }, [unitPicker]);
+
+  useEffect(() => {
+    // Sama seperti modal satuan: shortcut 1–4 payment butuh fokus di dalam
+    // modal; guard isField di handlePaymentKeyDown tetap melindungi ketikan
+    // saat fokus pindah ke input nominal.
+    if (payOpen) payRef.current?.focus();
+  }, [payOpen]);
 
   // Dropdown hasil dirender lewat portal ke document.body agar lolos dari
   // stacking context `backdrop-filter` pada Card bar atas. Posisinya dihitung
@@ -213,13 +270,20 @@ const POS = () => {
 
   // Bersihkan editor diskon bila item hilang (mis. qty turun ke 0) atau keranjang kosong.
   useEffect(() => {
-    if (cart.items.length === 0) { setDiscountEditorKey(null); return; }
+    if (cart.items.length === 0) {
+      setDiscountEditorKey(null);
+      setSelectedItemKey(null);
+      return;
+    }
     if (discountEditorKey && !cart.items.some((i) => cart.keyOf(i) === discountEditorKey)) {
       setDiscountEditorKey(null);
     }
+    if (selectedItemKey && !cart.items.some((i) => cart.keyOf(i) === selectedItemKey)) {
+      setSelectedItemKey(null);
+    }
     // keyOf stabil; sengaja hanya bergantung pada daftar item & key editor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart.items, discountEditorKey]);
+  }, [cart.items, discountEditorKey, selectedItemKey]);
 
   const focusBarcode = useCallback(() => barcodeRef.current?.focus(), []);
 
@@ -275,6 +339,10 @@ const POS = () => {
 
   const handleBarcode = (event) => {
     if (event.key !== 'Enter') return;
+    // Jangan tambah produk di balik modal terbuka (Tab bisa mencapai kolom
+    // barcode yang tidak ter-trap; scanner tetap aman karena butuh Enter).
+    if (holdOpen || holdsOpen || receiptSale || memberModal || payOpen
+      || unitPicker || scanOpen || clearCartOpen || confirmResume) return;
     const code = barcode.trim();
     if (!code) return;
     setBarcode('');
@@ -315,7 +383,10 @@ const POS = () => {
   };
 
   const openPayment = () => {
+    if (!shift) return;
     if (cart.items.length === 0) return toast.warning('Keranjang masih kosong');
+    // Jangan tumpuk modal: biarkan Esc mengurai overlay yang sudah terbuka.
+    if (cartOverlaysOpen) return;
     const total = estimatedTotal;
     setPayments([{ method: 'cash', amount: String(total), reference: '' }]);
     setCreditMode(false);
@@ -354,8 +425,14 @@ const POS = () => {
     }
   };
 
+  // Ref anti double-submit: state `submitting` belum ter-update pada
+  // klik/Enter kedua yang datang sebelum re-render berikutnya.
+  const submittingRef = useRef(false);
+
   const checkout = async () => {
+    if (submittingRef.current) return;
     if (creditMode && !customerId) return toast.warning('Pilih pelanggan grosir untuk penjualan kredit');
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const payload = {
@@ -390,6 +467,7 @@ const POS = () => {
       setPayOpen(false);
       cart.clear();
       setDiscountEditorKey(null);
+      setSelectedItemKey(null);
       setCreditMode(false);
       setCustomerId('');
       setDueDate('');
@@ -398,22 +476,378 @@ const POS = () => {
     } catch (err) {
       toast.error(err.message);
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
   const printReceipt = () => window.print();
 
+  // ---------- Navigasi keyboard dropdown pencarian ----------
+  const handleSearchKeyDown = (event) => {
+    if (event.key === 'ArrowDown') {
+      if (searchFlat.length === 0) return;
+      event.preventDefault();
+      setSearchActiveIndex((i) => (i + 1) % searchFlat.length);
+    } else if (event.key === 'ArrowUp') {
+      if (searchFlat.length === 0) return;
+      event.preventDefault();
+      setSearchActiveIndex((i) => (i - 1 + searchFlat.length) % searchFlat.length);
+    } else if (event.key === 'Enter') {
+      if (!dropdownVisible || searchActiveIndex < 0) return;
+      const entry = searchFlat[searchActiveIndex];
+      if (!entry) return;
+      event.preventDefault();
+      if (entry.kind === 'bundle') selectBundle(entry.item);
+      else selectProduct(entry.item);
+    }
+  };
+
+  // ---------- Unit picker ----------
+  const unitOptions = unitPicker
+    ? [{ kind: 'base' }, ...(unitPicker.units || []).map((unit) => ({ kind: 'unit', unit }))]
+    : [];
+
+  const chooseUnitOption = (option) => {
+    if (!unitPicker || !option) return;
+    if (option.kind === 'base') addProduct(unitPicker.product);
+    else addProduct(unitPicker.product, option.unit);
+    setUnitPicker(null);
+  };
+
+  const handleUnitKeyDown = (event) => {
+    if (!unitPicker) return;
+    const count = unitOptions.length;
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setUnitActiveIndex((i) => (i + 1) % count);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setUnitActiveIndex((i) => (i - 1 + count) % count);
+    } else if (event.key === 'Enter') {
+      // Enter pada tombol yang fokus (Tab) sudah memicu klik native — biarkan
+      // klik yang menang agar tidak double-add dengan opsi highlight.
+      if (event.target instanceof Element && event.target.closest('button')) return;
+      const option = unitOptions[unitActiveIndex];
+      if (option) {
+        event.preventDefault();
+        chooseUnitOption(option);
+      }
+    } else if (/^[1-9]$/.test(event.key)) {
+      const idx = Number(event.key) - 1;
+      if (idx < count) {
+        event.preventDefault();
+        chooseUnitOption(unitOptions[idx]);
+      }
+    }
+  };
+
+  // ---------- Member modal ----------
+  const chooseMember = (member) => {
+    cart.setMember(member);
+    setMemberModal(false);
+    setMemberSearch('');
+  };
+
+  const handleMemberKeyDown = (event) => {
+    if (event.key === 'ArrowDown') {
+      if (memberResults.length === 0) return;
+      event.preventDefault();
+      setMemberActiveIndex((i) => (i + 1) % memberResults.length);
+    } else if (event.key === 'ArrowUp') {
+      if (memberResults.length === 0) return;
+      event.preventDefault();
+      setMemberActiveIndex((i) => (i - 1 + memberResults.length) % memberResults.length);
+    } else if (event.key === 'Enter') {
+      const member = memberResults[memberActiveIndex];
+      if (!member) return;
+      event.preventDefault();
+      chooseMember(member);
+    }
+  };
+
+  // ---------- Pembayaran: metode cepat + konfirmasi ----------
+  // Digit 1–4 hanya mengganti metode bila satu baris pembayaran; saat split,
+  // ganti metode baris pertama saja agar baris lain tidak hilang.
+  const selectPayMethod = (methodKey) => {
+    if (payments.length > 1) {
+      setPayments(payments.map((p, i) => (i === 0 ? { ...p, method: methodKey } : p)));
+      return;
+    }
+    setPayments([{ method: methodKey, amount: String(estimatedTotal), reference: '' }]);
+  };
+
+  // Dihitung inline saat keydown: estimatedTotal/paidTotal dideklarasikan
+  // lebih bawah di scope render yang sama (closure aman dipanggil setelah render).
+  const isPayConfirmDisabled = () => submitting
+    || (creditMode
+      ? (!customerId || paidTotal > estimatedTotal)
+      : paidTotal < estimatedTotal);
+
+  const handlePaymentKeyDown = (event) => {
+    if (!payOpen) return;
+    const tag = event.target?.tagName;
+    const isInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || event.target?.isContentEditable;
+    // Enter pada tombol yang fokus (Batal/metode/split) memicu klik native —
+    // biarkan klik yang menang agar Batal tidak berubah menjadi Bayar.
+    const isButton = tag === 'BUTTON'
+      || (event.target instanceof Element && Boolean(event.target.closest('button')));
+    if (/^[1-4]$/.test(event.key) && !isInput && !isButton) {
+      event.preventDefault();
+      const method = PAY_METHODS[Number(event.key) - 1];
+      if (method) selectPayMethod(method.key);
+    } else if (event.key === 'Enter' && !isInput && !isButton && !isPayConfirmDisabled()) {
+      event.preventDefault();
+      checkout();
+    }
+  };
+
+  // ---------- Hold / resume ----------
+  const loadHolds = useCallback(async () => {
+    setHoldsLoading(true);
+    setHoldsError(null);
+    try {
+      const result = await api.get('/api/holds', { status: 'active', limit: 50 });
+      setHoldsList(result.data || []);
+    } catch (err) {
+      setHoldsError(err.message);
+    } finally {
+      setHoldsLoading(false);
+    }
+  }, []);
+
+  const openHoldModal = () => {
+    if (!shift) return;
+    if (cart.items.length === 0) return toast.warning('Keranjang masih kosong');
+    if (cartOverlaysOpen) return;
+    setHoldName('');
+    setHoldNote('');
+    setHoldOpen(true);
+  };
+
+  const openHoldsList = () => {
+    if (!shift) return;
+    if (cartOverlaysOpen) return;
+    setHoldsOpen(true);
+    loadHolds();
+  };
+
+  const submitHold = async () => {
+    if (cart.items.length === 0) return toast.warning('Keranjang masih kosong');
+    setHoldSaving(true);
+    try {
+      const payload = {
+        shift_id: shift?.id || null,
+        hold_name: holdName,
+        note: holdNote,
+        member_id: cart.member?.id || null,
+        txn_discount: cart.txnDiscount,
+        redeem_points: cart.redeemPoints,
+        estimated_total: estimatedTotal,
+        items: cart.items.map((item) => (
+          item.bundle_id
+            ? {
+              bundle_id: item.bundle_id,
+              qty: item.qty,
+              discount: item.discount,
+              name: item.name,
+              sku: item.sku,
+              price: item.price,
+            }
+            : {
+              product_id: item.product_id,
+              unit_id: item.unit_id,
+              qty: item.qty,
+              discount: item.discount,
+              name: item.name,
+              unit_name: item.unit_name,
+              sku: item.sku,
+              price: item.price,
+            }
+        )),
+      };
+      const result = await api.post('/api/holds', payload);
+      cart.clear();
+      setDiscountEditorKey(null);
+      setSelectedItemKey(null);
+      setHoldOpen(false);
+      toast.success(`Hold ${result.hold.hold_code} tersimpan`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setHoldSaving(false);
+    }
+  };
+
+  const resumeHold = async (hold) => {
+    setResumeHolding(hold.id);
+    try {
+      const detail = await api.get(`/api/holds/${hold.id}`);
+      const rawItems = Array.isArray(detail.items) ? detail.items : [];
+      const usable = rawItems.filter((i) => !i.is_gone);
+      const goneCount = rawItems.length - usable.length;
+      if (usable.length === 0) {
+        toast.error('Semua item pada hold tidak lagi tersedia');
+        await api.del(`/api/holds/${hold.id}?reason=resume`).catch(() => {});
+        setHoldsOpen(false);
+        setConfirmResume(null);
+        return;
+      }
+
+      // Hidrasi cart dari snapshot hold (referensi + qty + discount).
+      // Harga di-requote oleh quote effect; server tetap otoritatif di checkout.
+      const items = usable.map((i) => (
+        i.bundle_id
+          ? {
+            bundle_id: i.bundle_id,
+            is_bundle: true,
+            name: i.name || `Paket #${i.bundle_id}`,
+            sku: i.sku || '',
+            price: Number(i.price) || 0,
+            qty: i.qty,
+            discount: i.discount || 0,
+          }
+          : {
+            product_id: i.product_id,
+            unit_id: i.unit_id || null,
+            unit_name: i.unit_name || null,
+            name: i.name || `Produk #${i.product_id}`,
+            sku: i.sku || '',
+            price: Number(i.price) || 0,
+            qty: i.qty,
+            discount: i.discount || 0,
+            stock_available: 0,
+            conversion_factor: 1,
+          }
+      ));
+
+      let member = null;
+      if (detail.member_id) {
+        try {
+          const memberDetail = await api.get(`/api/members/${detail.member_id}`);
+          if (memberDetail && memberDetail.is_active !== false) member = memberDetail;
+        } catch {
+          member = null;
+        }
+      }
+
+      cart.restore({
+        items,
+        member,
+        txnDiscount: Number(detail.txn_discount) || 0,
+        redeemPoints: Number(detail.redeem_points) || 0,
+      });
+      setDiscountEditorKey(null);
+
+      await api.del(`/api/holds/${hold.id}?reason=resume`);
+      setHoldsOpen(false);
+      setConfirmResume(null);
+      if (goneCount > 0) toast.warning(`${goneCount} item hold tidak lagi tersedia dan dilewati`);
+      toast.success(`Hold ${detail.hold_code} dimuat ke keranjang`);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setResumeHolding(null);
+    }
+  };
+
+  const requestResumeHold = (hold) => {
+    if (cart.items.length > 0) {
+      setConfirmResume(hold);
+      return;
+    }
+    resumeHold(hold);
+  };
+
+  const cancelHold = async (hold) => {
+    try {
+      await api.del(`/api/holds/${hold.id}`);
+      toast.success(`Hold ${hold.hold_code} dibatalkan`);
+      loadHolds();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const confirmClearCart = () => {
+    setDiscountEditorKey(null);
+    setSelectedItemKey(null);
+    cart.clear();
+    setClearCartOpen(false);
+    toast.success('Keranjang dikosongkan');
+  };
+
+  // ---------- Seleksi baris keranjang ----------
+  // Guard modal: penyesuaian qty keyboard tidak boleh mengubah cart di balik modal.
+  const cartOverlaysOpen = Boolean(
+    payOpen || memberModal || unitPicker || scanOpen
+    || holdOpen || holdsOpen || receiptSale || clearCartOpen || confirmResume
+  );
+
+  const selectCartItem = (key) => {
+    setSelectedItemKey((prev) => (prev === key ? null : key));
+  };
+
+  const adjustSelectedQty = (delta) => {
+    if (!selectedItemKey || cartOverlaysOpen) return;
+    const item = cart.items.find((i) => cart.keyOf(i) === selectedItemKey);
+    if (!item) {
+      setSelectedItemKey(null);
+      return;
+    }
+    cart.updateQtyByKey(selectedItemKey, item.qty + delta);
+  };
+
   useHotkeys({
     F2: () => searchRef.current?.focus(),
     F4: () => openPayment(),
-    F8: () => { setPayments([{ method: 'cash', amount: String(estimatedTotal), reference: '' }]); setPayOpen(true); },
+    F6: openHoldModal,
+    F7: openHoldsList,
+    F8: () => {
+      if (!shift) return;
+      if (cart.items.length === 0) return toast.warning('Keranjang masih kosong');
+      if (cartOverlaysOpen) return;
+      setPayments([{ method: 'cash', amount: String(estimatedTotal), reference: '' }]);
+      setCreditMode(false);
+      setCustomerId('');
+      setPayTerm('30');
+      setDueDate('');
+      setPayOpen(true);
+    },
+    H: openHoldModal,
+    A: openHoldsList,
+    M: () => { if (shift && !cartOverlaysOpen) setMemberModal(true); },
+    C: () => { if (shift && cart.items.length > 0) setClearCartOpen(true); },
+    K: () => { if (shift && !cartOverlaysOpen) setScanOpen(true); },
+    'Alt+H': openHoldModal,
+    'Alt+A': openHoldsList,
+    'Alt+M': () => { if (shift && !cartOverlaysOpen) setMemberModal(true); },
+    'Alt+C': () => { if (shift && cart.items.length > 0 && !cartOverlaysOpen) setClearCartOpen(true); },
+    'Alt+K': () => { if (shift && !cartOverlaysOpen) setScanOpen(true); },
+    '+': () => adjustSelectedQty(1),
+    '=': () => adjustSelectedQty(1),
+    '-': () => adjustSelectedQty(-1),
     Escape: () => {
-      if (payOpen) setPayOpen(false);
+      if (confirmResume) setConfirmResume(null);
+      else if (clearCartOpen) setClearCartOpen(false);
+      else if (holdOpen) setHoldOpen(false);
+      else if (holdsOpen) setHoldsOpen(false);
+      else if (receiptSale) setReceiptSale(null);
+      else if (memberModal) setMemberModal(false);
+      else if (payOpen) setPayOpen(false);
       else if (unitPicker) setUnitPicker(null);
+      else if (scanOpen) setScanOpen(false);
       else if (searchOpen) { setSearchOpen(false); setSearch(''); }
+      else if (selectedItemKey) setSelectedItemKey(null);
     },
   });
+
+  // Shortcut lokal modal struk: P cetak, Enter tutup (Esc ditangani cascade).
+  useHotkeys({
+    P: () => printReceipt(),
+    'Alt+P': () => printReceipt(),
+    Enter: () => setReceiptSale(null),
+  }, { enabled: Boolean(receiptSale) });
 
   // Perkiraan total di sisi klien (server tetap menghitung ulang saat checkout).
   const taxRate = Number(settings?.tax_rate || 0);
@@ -445,9 +879,16 @@ const POS = () => {
           <p className="text-sm text-slate-400 mb-4">
             Halo {user?.full_name}, masukkan kas awal untuk memulai shift sebelum bertransaksi.
           </p>
-          <Input label="Kas Awal (Rp)" type="number" value={openCash} onChange={(e) => setOpenCash(e.target.value)} autoFocus />
+          <Input
+            label="Kas Awal (Rp)"
+            type="number"
+            value={openCash}
+            onChange={(e) => setOpenCash(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); openShift(); } }}
+            autoFocus
+          />
           <Button className="w-full mt-4" onClick={openShift} size="lg">
-            Buka Shift
+            Buka Shift (Enter)
           </Button>
         </Card>
       </div>
@@ -473,7 +914,7 @@ const POS = () => {
             </div>
             <CameraScanButton
               onClick={() => setScanOpen(true)}
-              label="Kamera"
+              label="Kamera (Alt+K)"
               className="shrink-0 px-3"
               size="lg"
             />
@@ -486,17 +927,19 @@ const POS = () => {
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setSearchOpen(true); }}
                 onFocus={() => { if (search.trim()) setSearchOpen(true); }}
+                onKeyDown={handleSearchKeyDown}
               />
               {searchOpen && debouncedSearch.trim().length > 0 && (
                 <SearchResults
                   anchorRect={dropdownRect}
                   containerRef={dropdownRef}
                   loading={loadingProducts}
-                  products={products}
-                  bundles={bundles}
+                  products={visibleProducts}
+                  bundles={visibleBundles}
                   query={debouncedSearch}
                   member={cart.member}
                   expiringProducts={expiringProducts}
+                  activeIndex={searchActiveIndex}
                   onSelectProduct={selectProduct}
                   onSelectBundle={selectBundle}
                 />
@@ -517,11 +960,21 @@ const POS = () => {
             <h3 className="font-semibold text-white flex items-center gap-2">
               <ShoppingCart size={18} /> Keranjang ({cart.items.length})
             </h3>
-            {cart.items.length > 0 && (
-              <Button variant="ghost" size="sm" onClick={() => { setDiscountEditorKey(null); cart.clear(); }}>
-                <Trash2 size={14} /> Kosongkan
+            <div className="flex items-center gap-2">
+              <Button variant="neutral" size="sm" onClick={openHoldsList}>
+                <ListChecks size={14} /> Hold (Alt+A)
               </Button>
-            )}
+              {cart.items.length > 0 && (
+                <>
+                  <Button variant="neutral" size="sm" onClick={openHoldModal}>
+                    <PauseCircle size={14} /> Tahan (Alt+H)
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setClearCartOpen(true)}>
+                    <Trash2 size={14} /> Kosongkan (Alt+C)
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
 
           {cart.member ? (
@@ -539,9 +992,12 @@ const POS = () => {
           ) : (
             <div className="flex gap-2">
               <Button variant="neutral" size="sm" className="flex-1" onClick={() => setMemberModal(true)}>
-                <UserPlus size={14} /> Pilih Member
+                <UserPlus size={14} /> Pilih Member (Alt+M)
               </Button>
             </div>
+          )}
+          {cart.items.length > 0 && (
+            <p className="mt-2 text-[10px] text-slate-500">Klik baris lalu tekan + / − untuk ubah jumlah</p>
           )}
         </div>
 
@@ -554,8 +1010,17 @@ const POS = () => {
             cart.items.map((item) => {
               const key = cart.keyOf(item);
               const editorOpen = discountEditorKey === key;
+              const selected = selectedItemKey === key;
               return (
-                <div key={key} className="bg-white/5 rounded-ios-sm px-3 py-2">
+                <div
+                  key={key}
+                  onClick={(e) => {
+                    if (e.target instanceof Element && e.target.closest('button,input')) return;
+                    selectCartItem(key);
+                  }}
+                  aria-pressed={selected}
+                  className={`${selected ? 'bg-ios-blue/10 ring-2 ring-ios-blue/60' : 'bg-white/5'} rounded-ios-sm px-3 py-2 cursor-pointer`}
+                >
                   <div className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-white truncate">{item.name}</div>
@@ -701,40 +1166,50 @@ const POS = () => {
 
       {/* Modal pilih satuan */}
       <Modal isOpen={Boolean(unitPicker)} onClose={() => setUnitPicker(null)} title={unitPicker?.product?.name} size="sm">
-        <div className="space-y-2">
+        <div ref={unitPickerRef} tabIndex={-1} className="space-y-2 outline-none" onKeyDown={handleUnitKeyDown}>
           <button
-            onClick={() => { addProduct(unitPicker.product); setUnitPicker(null); }}
-            className="w-full flex justify-between items-center px-4 py-3 bg-white/5 rounded-ios-sm hover:bg-white/10"
+            onClick={() => chooseUnitOption(unitOptions[0])}
+            className={`w-full flex justify-between items-center px-4 py-3 rounded-ios-sm ${unitActiveIndex === 0 ? 'bg-ios-blue/25 border border-ios-blue/50' : 'bg-white/5 hover:bg-white/10'}`}
           >
-            <span className="text-white">1 {unitPicker?.product?.base_unit}</span>
+            <span className="text-white">1 {unitPicker?.product?.base_unit} <span className="text-xs text-slate-500">(1)</span></span>
             <span className="text-ios-green">
               {formatCurrency(cart.member && unitPicker?.product?.member_price != null ? unitPicker.product.member_price : unitPicker?.product?.sell_price)}
             </span>
           </button>
-          {unitPicker?.units.map((unit) => (
+          {unitPicker?.units.map((unit, idx) => (
             <button
               key={unit.id}
-              onClick={() => { addProduct(unitPicker.product, unit); setUnitPicker(null); }}
-              className="w-full flex justify-between items-center px-4 py-3 bg-white/5 rounded-ios-sm hover:bg-white/10"
+              onClick={() => chooseUnitOption(unitOptions[idx + 1])}
+              className={`w-full flex justify-between items-center px-4 py-3 rounded-ios-sm ${unitActiveIndex === idx + 1 ? 'bg-ios-blue/25 border border-ios-blue/50' : 'bg-white/5 hover:bg-white/10'}`}
             >
-              <span className="text-white">1 {unit.unit_name} (x{unit.conversion_factor})</span>
+              <span className="text-white">
+                {idx + 2} {unit.unit_name} (x{unit.conversion_factor}) <span className="text-xs text-slate-500">({idx + 2})</span>
+              </span>
               <span className="text-ios-green">
                 {formatCurrency(cart.member && unit.member_price != null ? unit.member_price : unit.sell_price)}
               </span>
             </button>
           ))}
+          <p className="text-[10px] text-slate-500 pt-1">↑/↓ lalu Enter, atau tekan angka sesuai urutan</p>
         </div>
       </Modal>
 
       {/* Modal pilih member */}
       <Modal isOpen={memberModal} onClose={() => setMemberModal(false)} title="Member" size="sm">
-        <Input label="Cari Member" value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} placeholder="Nama / kode / telepon..." autoFocus />
+        <Input
+          label="Cari Member"
+          value={memberSearch}
+          onChange={(e) => setMemberSearch(e.target.value)}
+          onKeyDown={handleMemberKeyDown}
+          placeholder="Nama / kode / telepon..."
+          autoFocus
+        />
         <div className="mt-3 space-y-2 max-h-64 overflow-y-auto">
-          {memberResults.map((member) => (
+          {memberResults.map((member, idx) => (
             <button
               key={member.id}
-              onClick={() => { cart.setMember(member); setMemberModal(false); setMemberSearch(''); }}
-              className="w-full flex justify-between items-center px-3 py-2 bg-white/5 rounded-ios-sm hover:bg-white/10"
+              onClick={() => chooseMember(member)}
+              className={`w-full flex justify-between items-center px-3 py-2 rounded-ios-sm ${memberActiveIndex === idx ? 'bg-ios-blue/25 border border-ios-blue/50' : 'bg-white/5 hover:bg-white/10'}`}
             >
               <div className="text-left">
                 <div className="text-sm text-white">{member.name}</div>
@@ -747,6 +1222,9 @@ const POS = () => {
           ))}
           {memberSearch && memberResults.length === 0 && (
             <p className="text-sm text-slate-500 text-center py-4">Member tidak ditemukan</p>
+          )}
+          {memberResults.length > 0 && (
+            <p className="text-[10px] text-slate-500">↑/↓ lalu Enter untuk memilih</p>
           )}
         </div>
 
@@ -795,7 +1273,7 @@ const POS = () => {
           </div>
         }
       >
-        <div className="space-y-4">
+        <div ref={payRef} tabIndex={-1} className="space-y-4 outline-none" onKeyDown={handlePaymentKeyDown}>
           {canCredit && (
             <button
               type="button"
@@ -860,17 +1338,19 @@ const POS = () => {
           )}
 
           <div className="grid grid-cols-4 gap-2">
-            {PAY_METHODS.map(({ key, label, icon: Icon }) => (
+            {PAY_METHODS.map(({ key, label, icon: Icon }, idx) => (
               <button
                 key={key}
-                onClick={() => setPayments([{ method: key, amount: String(estimatedTotal), reference: '' }])}
+                onClick={() => selectPayMethod(key)}
                 className={`flex flex-col items-center gap-1 py-3 rounded-ios-sm text-xs transition-colors ${payments.length === 1 && payments[0].method === key ? 'bg-ios-blue text-white' : 'bg-white/5 text-slate-300 hover:bg-white/10'}`}
               >
                 <Icon size={20} />
                 {label}
+                <span className="text-[10px] opacity-70">({idx + 1})</span>
               </button>
             ))}
           </div>
+          <p className="text-[10px] text-slate-500 -mt-2">Tekan 1–4 untuk pilih metode, Enter untuk konfirmasi bayar</p>
 
           <div className="space-y-2">
             {payments.map((payment, index) => (
@@ -890,6 +1370,12 @@ const POS = () => {
                   className="flex-1"
                   value={payment.amount}
                   onChange={(e) => setPayments(payments.map((p, i) => (i === index ? { ...p, amount: e.target.value } : p)))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !isPayConfirmDisabled()) {
+                      e.preventDefault();
+                      checkout();
+                    }
+                  }}
                 />
                 {payments.length > 1 && (
                   <Button variant="ghost" size="sm" onClick={() => setPayments(payments.filter((_, i) => i !== index))}>
@@ -959,8 +1445,8 @@ const POS = () => {
         size="sm"
         footer={
           <div className="flex justify-end gap-2">
-            <Button variant="neutral" onClick={() => setReceiptSale(null)}>Tutup</Button>
-            <Button onClick={printReceipt}><Printer size={16} /> Cetak Struk</Button>
+            <Button variant="neutral" onClick={() => setReceiptSale(null)}>Tutup (Enter)</Button>
+            <Button onClick={printReceipt}><Printer size={16} /> Cetak Struk (Alt+P)</Button>
           </div>
         }
       >
@@ -976,6 +1462,133 @@ const POS = () => {
           </>
         )}
       </Modal>
+
+      {/* Modal tahan (hold) keranjang */}
+      <Modal
+        isOpen={holdOpen}
+        onClose={() => setHoldOpen(false)}
+        title="Tahan Keranjang"
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="neutral" onClick={() => setHoldOpen(false)} disabled={holdSaving}>Batal</Button>
+            <Button onClick={submitHold} disabled={holdSaving || cart.items.length === 0}>
+              {holdSaving ? 'Menyimpan...' : 'Simpan Hold (Enter)'}
+            </Button>
+          </div>
+        }
+      >
+        <div
+          className="space-y-3"
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter') return;
+            // Enter pada tombol footer (Batal/Simpan) memicu klik native —
+            // biarkan klik yang menang agar Batal tidak ikut menyimpan hold.
+            if (e.target instanceof Element && e.target.closest('button')) return;
+            e.preventDefault();
+            submitHold();
+          }}
+        >
+          <p className="text-sm text-slate-400">
+            Keranjang disimpan sementara tanpa mengunci stok. Tekan <span className="text-white">Alt+A</span> (atau F7) untuk mengambilnya kembali.
+          </p>
+          <Input
+            label="Nama Hold (opsional)"
+            value={holdName}
+            onChange={(e) => setHoldName(e.target.value)}
+            placeholder="Mis.: Pak Bu Sari / Meja 2"
+            autoFocus
+          />
+          <Input
+            label="Catatan (opsional)"
+            value={holdNote}
+            onChange={(e) => setHoldNote(e.target.value)}
+            placeholder="Catatan singkat..."
+          />
+          <div className="text-xs text-slate-500">
+            {cart.items.length} item · total ± {formatCurrency(estimatedTotal)}
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal daftar hold aktif */}
+      <Modal
+        isOpen={holdsOpen}
+        onClose={() => setHoldsOpen(false)}
+        title="Hold Aktif"
+        size="md"
+        footer={
+          <div className="flex justify-between items-center">
+            <span className="text-xs text-slate-500">↑/↓ lalu Enter untuk mengambil hold</span>
+            <Button variant="neutral" onClick={() => setHoldsOpen(false)}>Tutup</Button>
+          </div>
+        }
+      >
+        <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+          {holdsLoading && <p className="text-sm text-slate-400 text-center py-6">Memuat hold...</p>}
+          {holdsError && <p className="text-sm text-ios-red text-center py-6">{holdsError}</p>}
+          {!holdsLoading && !holdsError && holdsList.length === 0 && (
+            <p className="text-sm text-slate-500 text-center py-6">Belum ada hold aktif</p>
+          )}
+          {holdsList.map((hold) => (
+            <div
+              key={hold.id}
+              className={`flex items-center justify-between gap-3 px-3 py-2 rounded-ios-sm ${resumeHolding === hold.id ? 'bg-ios-blue/20 border border-ios-blue/40' : 'bg-white/5'}`}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="text-sm text-white font-mono">{hold.hold_code}</div>
+                <div className="text-xs text-slate-400 truncate">
+                  {hold.hold_name || 'Tanpa nama'} · {hold.item_count} item · {formatCurrency(hold.estimated_total)}
+                  {hold.member_name ? ` · ${hold.member_name}` : ''}
+                </div>
+                <div className="text-[10px] text-slate-500">
+                  {hold.cashier_name} · {new Date(hold.created_at).toLocaleString('id-ID')}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  onClick={() => requestResumeHold(hold)}
+                  disabled={resumeHolding === hold.id}
+                >
+                  {resumeHolding === hold.id ? 'Memuat...' : 'Ambil'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => cancelHold(hold)}
+                  disabled={resumeHolding === hold.id}
+                  title="Batalkan hold"
+                >
+                  <Trash2 size={14} className="text-ios-red" />
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Modal>
+
+      {/* Konfirmasi kosongkan cart */}
+      <ConfirmDialog
+        isOpen={clearCartOpen}
+        onClose={() => setClearCartOpen(false)}
+        onConfirm={confirmClearCart}
+        title="Kosongkan Keranjang?"
+        message={`Hapus semua ${cart.items.length} item dari keranjang? Tindakan ini tidak dapat dibatalkan.`}
+        confirmLabel="Ya, Kosongkan"
+      />
+
+      {/* Konfirmasi resume hold saat cart terisi */}
+      <ConfirmDialog
+        isOpen={Boolean(confirmResume)}
+        onClose={() => setConfirmResume(null)}
+        onConfirm={() => { if (confirmResume) resumeHold(confirmResume); }}
+        title="Ganti Keranjang?"
+        message={`Keranjang berisi item. Muat hold ${confirmResume?.hold_code || ''} akan mengganti isi keranjang saat ini.`}
+        confirmLabel="Ya, Muat Hold"
+        variant="warning"
+        loading={Boolean(resumeHolding)}
+      />
     </div>
   );
 };
@@ -983,7 +1596,9 @@ const POS = () => {
 // Dropdown hasil pencarian: produk + paket. Muncul saat kasir mengetik dan
 // menggantikan grid katalog yang dihapus. Produk multi-satuan tetap lewat
 // selectProduct (unit picker), produk stok 0 tidak bisa ditambahkan.
-const SearchResults = ({ anchorRect, containerRef, loading, products, bundles, query, member, expiringProducts, onSelectProduct, onSelectBundle }) => {
+// Navigasi keyboard (↑/↓/Enter) ditangani di input pencarian; activeIndex
+// menentukan baris yang di-highlight (0..bundles-1, lalu products).
+const SearchResults = ({ anchorRect, containerRef, loading, products, bundles, query, member, expiringProducts, activeIndex = -1, onSelectProduct, onSelectBundle }) => {
   const q = String(query || '').trim().toLowerCase();
   const shownBundles = loading
     ? []
@@ -1014,11 +1629,11 @@ const SearchResults = ({ anchorRect, containerRef, loading, products, bundles, q
       {shownBundles.length > 0 && (
         <div>
           <div className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wide text-ios-purple">Paket</div>
-          {shownBundles.map((bundle) => (
+          {shownBundles.map((bundle, idx) => (
             <button
               key={`bundle-${bundle.id}`}
               onClick={() => onSelectBundle(bundle)}
-              className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-white/10"
+              className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left ${activeIndex === idx ? 'bg-ios-blue/25' : 'hover:bg-white/10'}`}
             >
               <div className="min-w-0 flex-1">
                 <div className="text-sm text-white truncate flex items-center gap-2">
@@ -1036,15 +1651,16 @@ const SearchResults = ({ anchorRect, containerRef, loading, products, bundles, q
       {shownProducts.length > 0 && (
         <div>
           <div className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wide text-ios-blue">Produk</div>
-          {shownProducts.map((product) => {
+          {shownProducts.map((product, idx) => {
             const price = member && product.member_price != null ? product.member_price : product.sell_price;
             const out = product.stock_qty <= 0;
             const expiryFlag = expiringProducts[product.id];
+            const flatIdx = shownBundles.length + idx;
             return (
               <button
                 key={`product-${product.id}`}
                 onClick={() => onSelectProduct(product)}
-                className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-white/10 disabled:opacity-40"
+                className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left disabled:opacity-40 ${activeIndex === flatIdx ? 'bg-ios-blue/25' : 'hover:bg-white/10'}`}
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-sm text-white truncate flex items-center gap-2">

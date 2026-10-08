@@ -13,7 +13,9 @@ const SIZES = {
   lg: 'px-5 py-2.5 text-base',
 };
 
-const Button = ({
+import { forwardRef } from 'react';
+
+const Button = forwardRef(({
   children,
   variant = 'primary',
   size = 'md',
@@ -21,8 +23,9 @@ const Button = ({
   className = '',
   disabled = false,
   ...props
-}) => (
+}, ref) => (
   <button
+    ref={ref}
     type={type}
     disabled={disabled}
     className={`inline-flex items-center justify-center gap-2 rounded-ios-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${VARIANTS[variant] || VARIANTS.primary} ${SIZES[size] || SIZES.md} ${className}`}
@@ -30,6 +33,8 @@ const Button = ({
   >
     {children}
   </button>
-);
+));
+
+Button.displayName = 'Button';
 
 export default Button;

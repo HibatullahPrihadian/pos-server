@@ -64,6 +64,7 @@ app.use('/api/stock', require('./routes/stock'));
 app.use('/api/purchases', require('./routes/purchases'));
 app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/sales', require('./routes/sales'));
+app.use('/api/holds', require('./routes/holds'));
 app.use('/api/returns', require('./routes/returns'));
 app.use('/api/shifts', require('./routes/shifts'));
 app.use('/api/print-services', require('./routes/print_services'));
@@ -171,6 +172,8 @@ const assertFeatureSchema = async () => {
             WHERE table_name = 'print_order_items'
               AND column_name IN ('product_id', 'base_qty', 'cost_price')`,
     },
+    // P9: hold/resume order (parkir keranjang POS).
+    { name: 'tabel order_holds', sql: "SELECT to_regclass('public.order_holds') AS ok" },
   ];
 
   for (const check of required) {

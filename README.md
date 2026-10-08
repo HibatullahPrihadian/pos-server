@@ -342,6 +342,7 @@ Semua endpoint berprefiks `/api`. Hanya `POST /api/auth/login` yang publik; sisa
 - **Purchases**: `GET/POST /purchases`, `GET/PUT /purchases/:id`, `POST /purchases/:id/receive`, `POST /purchases/:id/payment`, `POST /purchases/:id/cancel`
 - **Expenses**: `GET/POST/PUT/DELETE /expenses`, `GET /expenses/:id`, `POST /expenses/:id/payment`, `GET/POST/PUT/DELETE /expenses/categories`
 - **Sales**: `POST /sales`, `GET /sales`, `GET /sales/:id`, `GET /sales/by-invoice/:invoiceNo`, `POST /sales/:id/void`
+- **Holds**: `POST /holds`, `GET /holds`, `GET /holds/:id`, `DELETE /holds/:id?reason=resume|cancel` (parkir keranjang POS tanpa mengunci stok)
 - **Returns**: `POST /returns`, `GET /returns`, `GET /returns/:id`
 - **Shifts**: `GET /shifts/current`, `POST /shifts/open`, `POST /shifts/close`, `GET /shifts`, `GET /shifts/:id/summary`
 - **Reports** (semua mendukung `?format=csv`): `/reports/sales-summary`, `/reports/by-cashier`, `/reports/by-payment`, `/reports/gross-profit`, `/reports/profit-loss`, `/reports/purchase-paid`, `/reports/top-products`, `/reports/low-stock`, `/reports/stock-card/:productId`, `/reports/dashboard`
@@ -352,14 +353,45 @@ Semua endpoint berprefiks `/api`. Hanya `POST /api/auth/login` yang publik; sisa
 
 ## 8. Shortcut layar kasir
 
+### Global
+
 | Tombol | Fungsi |
 |---|---|
 | `Enter` di kolom barcode | Tambah produk hasil scan (scanner USB) |
-| Tombol **Kamera** | Buka pemindai kamera (butuh HTTPS) |
 | `F2` | Fokus ke kolom pencarian |
 | `F4` | Buka dialog pembayaran |
+| `F6` / `Alt+H` | Tahan/hold keranjang saat ini |
+| `F7` / `Alt+A` | Buka daftar hold aktif (ambil/lanjutkan) |
 | `F8` | Pembayaran tunai (isi otomatis total) |
+| `Alt+M` | Buka pilih member |
+| `Alt+C` | Kosongkan keranjang (dengan konfirmasi) |
+| `Alt+K` | Buka pemindai kamera (butuh HTTPS) |
+| `H` / `A` / `M` / `C` / `K` | Alias huruf tunggal — hanya saat fokus **bukan** di kolom teks |
 | `Esc` | Tutup dialog yang aktif |
+
+**Fokus kolom barcode:** state default layar kasir selalu fokus di barcode (untuk scanner USB). Dari sana pakai **F2/F4/F6/F7/F8** atau kombinasi **Alt+huruf** — scanner USB tidak pernah mengirim tombol Alt, jadi kombinasi aman dari tabrakan scan. `Ctrl`/`Cmd` tidak pernah dicegat (copy/paste/select-all tetap milik browser).
+
+### Navigasi list (tanpa mouse)
+
+| Konteks | Tombol | Fungsi |
+|---|---|---|
+| Dropdown pencarian | `↑` / `↓` | Pindah highlight produk/paket |
+| | `Enter` | Pilih item highlight |
+| Pilih satuan | `↑` / `↓` + `Enter`, atau `1`–`9` | Pilih satuan |
+| Pilih member | `↑` / `↓` + `Enter` | Pilih member |
+| Daftar hold | `Ambil` | Muat hold ke keranjang (konfirmasi bila cart terisi) |
+| Dialog pembayaran | `1`–`4` | Pilih metode: Tunai / QRIS / Debit / Transfer |
+| | `Enter` | Konfirmasi bayar (saat fokus bukan di input nominal) |
+| Modal struk | `Alt+P` / `P` | Cetak struk |
+| | `Enter` / `Esc` | Tutup modal struk |
+| Layar buka shift | `Enter` | Submit kas awal |
+
+### Fitur hold (tahan/ambil belanja)
+
+- **Tahan (H)**: simpan keranjang sementara (nama/note opsional). Tidak mengunci stok.
+- **Hold (A)**: daftar hold aktif → **Ambil** memuat isi hold ke keranjang; harga dihitung ulang via quote + checkout server.
+- Hold yang produknya dihapus/tidak aktif otomatis dilewati saat resume (dengan toast).
+- Kode hold berformat `HOLD-YYYYMMDD-NNNN`.
 
 Layar kasir memakai tata letak **1 kolom**: bar scan + kamera + pencarian di atas, daftar item keranjang (satu baris per item) di tengah, dan ringkasan **TOTAL + Bayar** yang menempel di bawah. Mengetik di pencarian memunculkan dropdown hasil (produk & paket); diskon item tersembunyi di balik ikon pada tiap baris.
 

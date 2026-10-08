@@ -944,6 +944,39 @@ CREATE INDEX IF NOT EXISTS idx_print_orders_queue_active
     ON print_orders (business, status, queue_no DESC NULLS LAST, id DESC);
 
 -- =========================================================
+-- Hold / resume order (parkir keranjang POS)
+-- =========================================================
+-- Keranjang ditahan sementara TANPA mengunci stok (prekeden: draft print_orders).
+-- Simpan referensi item (id + qty + discount), bukan harga beku: saat resume,
+-- cart dihidrasi ulang lalu quote + checkout server menghitung harga efektif.
+-- Status 'resumed' dipakai bila resume dipanggil lewat API; checkout biasa
+-- setelah hydrate juga menandai hold diambil.
+CREATE TABLE IF NOT EXISTS order_holds (
+    id SERIAL PRIMARY KEY,
+    business VARCHAR(20) NOT NULL DEFAULT 'minimarket',
+    hold_code VARCHAR(40) UNIQUE NOT NULL,
+    shift_id INTEGER REFERENCES shifts(id),
+    cashier_id INTEGER NOT NULL REFERENCES users(id),
+    hold_name VARCHAR(100),
+    member_id INTEGER REFERENCES members(id),
+    txn_discount BIGINT NOT NULL DEFAULT 0,
+    redeem_points INTEGER NOT NULL DEFAULT 0,
+    items JSONB NOT NULL,
+    estimated_total BIGINT NOT NULL DEFAULT 0,
+    note TEXT,
+    status VARCHAR(10) NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'resumed', 'cancelled')),
+    resumed_sale_id INTEGER REFERENCES sales(id),
+    cancelled_by INTEGER REFERENCES users(id),
+    cancelled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_order_holds_business_status ON order_holds (business, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_order_holds_cashier ON order_holds (cashier_id, created_at);
+
+-- =========================================================
 -- Cache insight AI laporan bulanan (kenari.id)
 -- =========================================================
 -- Satu narasi per (usaha, periode); tombol Regenerate memaksa refresh=1.
