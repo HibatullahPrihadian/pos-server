@@ -1,5 +1,6 @@
 const express = require('express');
 const fs = require('fs');
+const multer = require('multer');
 const path = require('path');
 const pool = require('../db');
 const { requirePermission } = require('../middleware/auth');
@@ -45,6 +46,7 @@ const validateProductBody = (body, { partial = false } = {}) => {
   if (!partial || 'name' in body) {
     const name = requireString(body?.name, 'Nama produk', 200);
     if (name.error) return { error: name.error };
+    if (/[<>"']/.test(name.value)) return { error: 'Nama produk tidak boleh mengandung < > " \'' };
     value.name = name.value;
   }
 
@@ -211,7 +213,7 @@ router.get('/barcode/:barcode', requirePermission('product.view'), async (req, r
 // Server tetap menghitung ulang saat checkout; endpoint ini hanya untuk tampilan.
 // Memakai resolver yang sama dengan checkout agar tidak terjadi penyimpangan harga.
 const MAX_QUOTE_ITEMS = 200;
-router.post('/quote', async (req, res, next) => {
+router.post('/quote', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (items.length > MAX_QUOTE_ITEMS) {
@@ -380,7 +382,11 @@ router.post('/:id/image', requirePermission('product.manage'), imageUpload.singl
       'SELECT image_path FROM products WHERE id = $1 AND business = $2',
       [req.params.id, req.business]
     );
-    if (!current.rows[0]) throw new HttpError(404, 'Produk tidak ditemukan');
+    if (!current.rows[0]) {
+      // Produk tak ada: hapus file yatim agar uploads tidak menumpuk.
+      await fs.promises.unlink(req.file.path).catch(() => {});
+      throw new HttpError(404, 'Produk tidak ditemukan');
+    }
 
     if (current.rows[0].image_path) {
       const oldFile = path.join(uploadRoot, path.basename(current.rows[0].image_path));
@@ -399,18 +405,31 @@ router.post('/:id/image', requirePermission('product.manage'), imageUpload.singl
 });
 
 // =========================================================
-// Impor CSV (admin)
+// Impor CSV (admin): JSON { csv } atau multipart field `csvFile`/text `csv`.
+// (Field `file` dicadangkan untuk upload gambar — jangan pakai untuk CSV.)
 // =========================================================
-router.post('/import', requirePermission('product.manage'), imageUpload.single('file'), async (req, res, next) => {
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const name = String(file.originalname || '').toLowerCase();
+    const okType = ['text/csv', 'application/vnd.ms-excel', 'text/plain', 'application/octet-stream'].includes(file.mimetype);
+    if (name.endsWith('.csv') || okType) return cb(null, true);
+    return cb(new HttpError(400, 'File harus berformat CSV (.csv)'));
+  },
+}).single('csvFile');
+router.post('/import', requirePermission('product.manage'), (req, res, next) => {
+  if (req.is('multipart/form-data')) return csvUpload(req, res, (err) => (err ? next(err) : next()));
+  return next();
+}, async (req, res, next) => {
   try {
     let text = '';
     if (req.file) {
-      text = await fs.promises.readFile(req.file.path, 'utf8');
-      await fs.promises.unlink(req.file.path).catch(() => {});
+      text = String(req.file.buffer || '').replace(/^\uFEFF/, '');
     } else if (typeof req.body?.csv === 'string') {
       text = req.body.csv;
     } else {
-      throw new HttpError(400, 'File CSV wajib diunggah (field: file)');
+      throw new HttpError(400, 'CSV wajib dikirim sebagai JSON { csv } atau multipart field csvFile');
     }
 
     const rows = parseCsv(text);
@@ -423,6 +442,7 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
 
     const imported = [];
     const errors = [];
+    const seenSku = new Set();
 
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
@@ -434,6 +454,11 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
         errors.push({ line, error: 'sku dan name wajib diisi' });
         continue;
       }
+      if (seenSku.has(sku.toLowerCase())) {
+        errors.push({ line, sku, error: 'SKU duplikat dalam file (baris terakhir menang bila diproses)' });
+        continue;
+      }
+      seenSku.add(sku.toLowerCase());
 
       const sellPrice = normalizeMoney(row.sell_price);
       if (sellPrice === null || sellPrice < 0) {
@@ -460,11 +485,21 @@ router.post('/import', requirePermission('product.manage'), imageUpload.single('
       if (supplierName) {
         const key = supplierName.toLowerCase();
         if (!supplierMap.has(key)) {
-          const inserted = await pool.query(
-            'INSERT INTO suppliers (name, business) VALUES ($1, $2) RETURNING id',
-            [supplierName, req.business]
+          // Tanpa unique (business,name): SELECT dulu lalu INSERT agar impor
+          // ulang tak gandakan supplier.
+          const existing = await pool.query(
+            'SELECT id FROM suppliers WHERE business = $1 AND LOWER(name) = $2 LIMIT 1',
+            [req.business, key]
           );
-          supplierMap.set(key, inserted.rows[0].id);
+          if (existing.rows[0]) {
+            supplierMap.set(key, existing.rows[0].id);
+          } else {
+            const inserted = await pool.query(
+              'INSERT INTO suppliers (name, business) VALUES ($1, $2) RETURNING id',
+              [supplierName, req.business]
+            );
+            supplierMap.set(key, inserted.rows[0].id);
+          }
         }
         supplierId = supplierMap.get(key);
       }

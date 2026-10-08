@@ -187,7 +187,7 @@ const Customers = () => {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="neutral" onClick={() => setModalOpen(false)}>Batal</Button>
-            <Button onClick={save} disabled={saving || !form.name}>{saving ? 'Menyimpan...' : 'Simpan'}</Button>
+            <Button onClick={save} disabled={saving || !form.name.trim()}>{saving ? 'Menyimpan...' : 'Simpan'}</Button>
           </div>
         }
       >
@@ -210,6 +210,7 @@ const Customers = () => {
           <Input
             label="Limit Kredit (Rp)"
             type="number"
+            min={0}
             value={form.credit_limit}
             onChange={(e) => setForm({ ...form, credit_limit: e.target.value })}
           />

@@ -12,7 +12,7 @@ const { applyStockMovement } = require('../utils/stock');
 const { allocateFefo, recordSaleItemBatch, recordShortfall, restoreSaleStock } = require('../utils/batches');
 const { extractTax, pointsEarned } = require('../utils/money');
 const { resolveItemsEffectivePricing } = require('../utils/item_pricing');
-const { getSettings } = require('../utils/settings');
+const { getSettings, getSettingsFor } = require('../utils/settings');
 const { logAudit } = require('../utils/audit');
 
 const router = express.Router();
@@ -78,6 +78,29 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
 
     const settings = await getSettings();
     if (!settings) throw new HttpError(500, 'Pengaturan toko belum diinisialisasi');
+
+    // Idempotensi: kirim header X-Idempotency-Key yang sama saat retry agar
+    // double-klik/retry jaringan tidak membuat dua invoice + stok ganda.
+    const idemKey = cleanString(req.get('X-Idempotency-Key'), 64);
+    if (idemKey) {
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS sale_idempotency (
+          key VARCHAR(64) NOT NULL,
+          business VARCHAR(30) NOT NULL DEFAULT 'minimarket',
+          sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          PRIMARY KEY (business, key)
+        )`
+      );
+      const prior = await pool.query(
+        'SELECT sale_id FROM sale_idempotency WHERE business = $1 AND key = $2',
+        [req.business, idemKey]
+      );
+      if (prior.rows[0]) {
+        const detail = await loadSaleDetail(pool, 'WHERE s.id = $1', [prior.rows[0].sale_id]);
+        if (detail) return res.status(200).json({ sale: detail, change: 0, member_points: null, idempotent: true });
+      }
+    }
 
     const result = await withTransaction(async (client) => {
       // Shift harus terbuka.
@@ -155,7 +178,9 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
         isMember,
       });
 
-      const allowNegativeStock = settings.allow_negative_stock === true;
+      const allowNegativeStock = req.business === 'minimarket'
+        ? settings.allow_negative_stock === true
+        : (await getSettingsFor(req.business, client)).allow_negative_stock === true;
 
       // Baris paket: ambil komponen, hitung HPP total, dan siapkan mutasi stok per komponen.
       const bundleLines = [];
@@ -547,6 +572,14 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
       return { sale, change, memberPointsAfter, invoiceNo };
     });
 
+    if (idemKey && result?.sale?.id) {
+      await pool.query(
+        `INSERT INTO sale_idempotency (business, key, sale_id)
+         VALUES ($1, $2, $3) ON CONFLICT (business, key) DO NOTHING`,
+        [req.business, idemKey, result.sale.id]
+      );
+    }
+
     await logAudit(pool, {
       userId: req.user.id,
       action: 'checkout',
@@ -572,7 +605,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
 // =========================================================
 // Riwayat & detail
 // =========================================================
-router.get('/', async (req, res, next) => {
+router.get('/', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
     const from = cleanString(req.query.from, 10);
@@ -663,7 +696,7 @@ const loadSaleDetail = async (runner, whereClause, params) => {
   return { ...sale, items: items.rows, payments: payments.rows, returns: returns.rows };
 };
 
-router.get('/by-invoice/:invoiceNo', async (req, res, next) => {
+router.get('/by-invoice/:invoiceNo', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const detail = await loadSaleDetail(pool, 'WHERE s.invoice_no = $1 AND s.business = $2', [req.params.invoiceNo, req.business]);
     if (!detail) throw new HttpError(404, 'Transaksi tidak ditemukan');
@@ -673,7 +706,7 @@ router.get('/by-invoice/:invoiceNo', async (req, res, next) => {
   }
 });
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const detail = await loadSaleDetail(pool, 'WHERE s.id = $1 AND s.business = $2', [req.params.id, req.business]);
     if (!detail) throw new HttpError(404, 'Transaksi tidak ditemukan');
@@ -702,8 +735,8 @@ router.post('/:id/void', requirePermission('pos.use'), async (req, res, next) =>
       }
 
       const todayCheck = await client.query(
-        'SELECT (created_at::date = CURRENT_DATE) AS is_today FROM sales WHERE id = $1',
-        [sale.id]
+        'SELECT ((created_at AT TIME ZONE $2)::date = (CURRENT_TIMESTAMP AT TIME ZONE $2)::date) AS is_today FROM sales WHERE id = $1',
+        [sale.id, APP_TIMEZONE]
       );
       if (!todayCheck.rows[0].is_today) {
         throw new HttpError(400, 'Hanya transaksi hari ini yang dapat di-void');

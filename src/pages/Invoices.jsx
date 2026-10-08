@@ -70,6 +70,9 @@ const Invoices = () => {
       const params = { page, limit: 25, from: range.from, to: range.to };
       if (debouncedSearch) params.search = debouncedSearch;
       if (filter === 'overdue') params.overdue_only = 'true';
+      else if (filter === 'unpaid') params.payment_status = 'unpaid';
+      else if (filter === 'partial') params.payment_status = 'partial';
+      else if (filter === 'paid') params.payment_status = 'paid';
       const result = await api.get('/api/invoices', params);
       setData(result);
     } catch (err) {

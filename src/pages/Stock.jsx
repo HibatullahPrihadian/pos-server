@@ -243,13 +243,13 @@ const Stock = () => {
               type="date"
               className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white focus:outline-none focus:border-ios-blue/60"
               value={range.from}
-              onChange={(e) => setRange({ ...range, from: e.target.value })}
+              onChange={(e) => { setRange({ ...range, from: e.target.value }); setPage(1); }}
             />
             <input
               type="date"
               className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white focus:outline-none focus:border-ios-blue/60"
               value={range.to}
-              onChange={(e) => setRange({ ...range, to: e.target.value })}
+              onChange={(e) => { setRange({ ...range, to: e.target.value }); setPage(1); }}
             />
           </div>
           <div className="p-4">

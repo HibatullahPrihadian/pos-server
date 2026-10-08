@@ -64,7 +64,7 @@ const buildItems = async (client, rawItems) => {
   return items;
 };
 
-router.get('/', async (req, res, next) => {
+router.get('/', requirePermission('purchase.view'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query);
     const status = cleanString(req.query.status, 20);
@@ -106,7 +106,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requirePermission('purchase.view'), async (req, res, next) => {
   try {
     const result = await pool.query(`${PO_SELECT} WHERE pu.id = $1 AND pu.business = $2`, [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Pembelian tidak ditemukan');
@@ -240,6 +240,9 @@ router.post('/:id/receive', requirePermission('purchase.manage'), async (req, re
           const expiry = cleanString(row.expiry_date, 10);
           if (expiry && !isValidDate(expiry)) {
             throw new HttpError(400, 'Format expiry_date harus YYYY-MM-DD');
+          }
+          if (expiry && expiry < new Date().toISOString().slice(0, 10)) {
+            throw new HttpError(400, `Batch ${expiry} sudah kedaluwarsa, tidak dapat diterima`);
           }
           itemMeta.set(itemId, {
             expiry_date: expiry || null,

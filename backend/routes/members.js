@@ -17,7 +17,7 @@ const nextMemberCode = async (client) => {
   return `MBR-${String(next).padStart(4, '0')}`;
 };
 
-router.get('/', async (req, res, next) => {
+router.get('/', requirePermission('pos.use', 'member.manage'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
     const search = cleanString(req.query.search, 100);
@@ -48,7 +48,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requirePermission('pos.use', 'member.manage'), async (req, res, next) => {
   try {
     const result = await pool.query('SELECT * FROM members WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Member tidak ditemukan');
@@ -58,18 +58,33 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
+// Format kontak longgar tapi bermakna: telepon digit/+/spasi/dash, email bentuk dasar.
+const normalizePhone = (value) => {
+  const phone = cleanString(value, 50);
+  if (!phone) return null;
+  if (!/^[+\d][\d\s\-().]{4,49}$/.test(phone)) return { error: 'Nomor telepon tidak valid' };
+  return { value: phone };
+};
+const normalizeEmail = (value) => {
+  const email = cleanString(value, 120);
+  if (!email) return null;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: 'Email tidak valid' };
+  return { value: email };
+};
 router.post('/', requirePermission('member.manage'), async (req, res, next) => {
   try {
     const name = requireString(req.body?.name, 'Nama member', 150);
     if (name.error) throw new HttpError(400, name.error);
 
-    const phone = cleanString(req.body?.phone, 50);
-    const email = cleanString(req.body?.email, 120);
+    const phone = normalizePhone(req.body?.phone);
+    if (phone?.error) throw new HttpError(400, phone.error);
+    const email = normalizeEmail(req.body?.email);
+    if (email?.error) throw new HttpError(400, email.error);
     const code = cleanString(req.body?.code, 30) || (await nextMemberCode(pool));
 
     const result = await pool.query(
       'INSERT INTO members (code, name, phone, email, business) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [code, name.value, phone, email, req.business]
+      [code, name.value, phone?.value || null, email?.value || null, req.business]
     );
     await logAudit(pool, { userId: req.user.id, action: 'create', entity: 'members', entityId: result.rows[0].id });
     res.status(201).json(result.rows[0]);
@@ -82,11 +97,15 @@ router.put('/:id', requirePermission('member.manage'), async (req, res, next) =>
   try {
     const name = requireString(req.body?.name, 'Nama member', 150);
     if (name.error) throw new HttpError(400, name.error);
+    const phone = normalizePhone(req.body?.phone);
+    if (phone?.error) throw new HttpError(400, phone.error);
+    const email = normalizeEmail(req.body?.email);
+    if (email?.error) throw new HttpError(400, email.error);
     const isActive = toBool(req.body?.is_active, true);
 
     const result = await pool.query(
       'UPDATE members SET name = $1, phone = $2, email = $3, is_active = $4 WHERE id = $5 AND business = $6 RETURNING *',
-      [name.value, cleanString(req.body?.phone, 50), cleanString(req.body?.email, 120), isActive, req.params.id, req.business]
+      [name.value, phone?.value || null, email?.value || null, isActive, req.params.id, req.business]
     );
     if (!result.rows[0]) throw new HttpError(404, 'Member tidak ditemukan');
     await logAudit(pool, { userId: req.user.id, action: 'update', entity: 'members', entityId: Number(req.params.id) });
@@ -109,7 +128,7 @@ router.delete('/:id', requirePermission('member.manage'), async (req, res, next)
   }
 });
 
-router.get('/:id/points', async (req, res, next) => {
+router.get('/:id/points', requirePermission('pos.use', 'member.manage'), async (req, res, next) => {
   try {
     const member = await pool.query('SELECT id, code, name, points FROM members WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!member.rows[0]) throw new HttpError(404, 'Member tidak ditemukan');

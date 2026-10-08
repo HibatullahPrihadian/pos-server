@@ -30,16 +30,15 @@ const renderEan13Svg = (code) =>
     backgroundcolor: 'FFFFFF',
   });
 
-// Validasi barcode paket: kosong diizinkan; bila EAN-13 internal wajib check digit benar.
+// Validasi barcode paket: kosong diizinkan; 13 digit wajib check digit benar
+// (tidak hanya prefix internal); duplikat lintas tabel paket+produk ditolak.
 const validateBundleBarcode = async (runner, barcode, excludeId = null) => {
   if (!barcode) return;
-  if (barcode.startsWith(INTERNAL_PREFIX)) {
-    if (!isValidEan13(barcode)) {
-      throw new HttpError(400, 'Barcode EAN-13 internal tidak valid (check digit salah)');
-    }
+  if (/^\d{13}$/.test(barcode) && !isValidEan13(barcode)) {
+    throw new HttpError(400, 'Barcode EAN-13 tidak valid (check digit salah)');
   }
   if (await isBarcodeTaken(runner, barcode, excludeId)) {
-    throw new HttpError(409, 'Barcode sudah dipakai paket lain');
+    throw new HttpError(409, 'Barcode sudah dipakai produk/paket lain');
   }
 };
 
@@ -182,7 +181,7 @@ router.post('/barcodes/render', requirePermission('bundle.manage'), async (req, 
   }
 });
 
-router.get('/barcode/:barcode', async (req, res, next) => {
+router.get('/barcode/:barcode', requirePermission('pos.use', 'bundle.manage'), async (req, res, next) => {
   try {
     const barcode = cleanString(req.params.barcode, 50);
     if (!barcode) throw new HttpError(400, 'Barcode wajib diisi');
@@ -198,7 +197,7 @@ router.get('/barcode/:barcode', async (req, res, next) => {
   }
 });
 
-router.get('/', async (req, res, next) => {
+router.get('/', requirePermission('pos.use', 'bundle.manage'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query);
     const activeOnly = toBool(req.query.is_active, false);
@@ -220,7 +219,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requirePermission('pos.use', 'bundle.manage'), async (req, res, next) => {
   try {
     const result = await pool.query(`${SELECT_BUNDLE} WHERE b.id = $1 AND b.business = $2`, [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Paket tidak ditemukan');

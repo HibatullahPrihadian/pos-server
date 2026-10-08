@@ -27,7 +27,9 @@ export const formatDateTime = (value) => {
   if (Number.isNaN(d.getTime())) return String(value);
   const date = `${String(d.getDate()).padStart(2, '0')} ${MONTHS_ID[d.getMonth()]} ${d.getFullYear()}`;
   const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  return `${date} ${time}`;
+  // Jam memakai zona browser; label eksplisit agar tak disangka jam server.
+  const tz = -d.getTimezoneOffset() === 420 ? 'WIB' : `UTC${-d.getTimezoneOffset() >= 0 ? '+' : ''}${-d.getTimezoneOffset() / 60}`;
+  return `${date} ${time} ${tz}`;
 };
 
 export const formatTime = (value) => {

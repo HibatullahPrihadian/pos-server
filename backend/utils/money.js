@@ -23,9 +23,10 @@ const extractTax = (grossTotal, taxRate) => {
   return { taxTotal, dpp: gross - taxTotal };
 };
 
-// HPP moving average saat penerimaan barang.
+// HPP moving average saat penerimaan barang. Stok minus diabaikan (dianggap 0)
+// agar satu penjualan minus tidak menggelembungkan HPP penerimaan berikut.
 const movingAverageCost = (stockQty, oldCost, receivedQty, unitCost) => {
-  const currentQty = toInt(stockQty);
+  const currentQty = Math.max(0, toInt(stockQty));
   const incomingQty = toInt(receivedQty);
   const totalQty = currentQty + incomingQty;
   if (totalQty <= 0) return toInt(unitCost);

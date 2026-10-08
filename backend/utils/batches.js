@@ -186,6 +186,29 @@ const recordShortfall = async (client, { productId, qtyShortfall, unitCost = 0, 
   return result.rows[0];
 };
 
+// Kurangi defisit shortfall sebuah produk (dipakai saat retur/void menambah stok
+// kembali). Mengembalikan sisa qty yang belum tertampung shortfall.
+const consumeShortfall = async (client, { productId, qty }) => {
+  let remaining = Math.round(Number(qty) || 0);
+  if (remaining <= 0) return 0;
+  const existing = await client.query(
+    `SELECT id, qty_remaining FROM stock_batches
+      WHERE product_id = $1 AND source = 'shortfall'
+      ORDER BY id LIMIT 1 FOR UPDATE`,
+    [productId]
+  );
+  if (!existing.rows[0]) return remaining;
+  const deficit = Math.abs(Number(existing.rows[0].qty_remaining) || 0);
+  const take = Math.min(remaining, deficit);
+  const after = Number(existing.rows[0].qty_remaining) + take;
+  if (after >= 0) {
+    await client.query('DELETE FROM stock_batches WHERE id = $1', [existing.rows[0].id]);
+  } else {
+    await client.query('UPDATE stock_batches SET qty_remaining = $1 WHERE id = $2', [after, existing.rows[0].id]);
+  }
+  return remaining - take;
+};
+
 // Kembalikan qty ke batch asal sebuah sale_item (retur/void), proporsional
 // terhadap porsi tiap batch. Bila tidak ada jejak (data lama), fallback ke batch
 // legacy. `qty` dalam satuan jual; alokasi tersimpan dalam satuan dasar.
@@ -215,6 +238,11 @@ const restoreSaleItemBatches = async (client, item, qty) => {
         remaining -= take;
       }
     }
+    // Sisa yang dulu tercatat sebagai shortfall (stok minus): tutup defisit dulu
+    // sebelum mengembalikan ke batch fisik.
+    if (remaining > 0) {
+      await consumeShortfall(client, { productId: item.product_id, qty: remaining });
+    }
     return;
   }
 
@@ -229,6 +257,7 @@ const restoreSaleItemBatches = async (client, item, qty) => {
       if (legacyId) {
         await restoreToBatch(client, { batchId: legacyId, qty: Math.round(component.qty * qty) });
       }
+      await consumeShortfall(client, { productId: component.product_id, qty: Math.round(component.qty * qty) });
     }
     return;
   }
@@ -238,13 +267,14 @@ const restoreSaleItemBatches = async (client, item, qty) => {
   if (legacyId) {
     await restoreToBatch(client, { batchId: legacyId, qty: Math.round(conversionFactor * qty) });
   }
+  await consumeShortfall(client, { productId: item.product_id, qty: Math.round(conversionFactor * qty) });
 };
 
 // Kembalikan stok seluruh item sebuah penjualan saat void (produk & paket).
 // Dipakai bersama oleh void penjualan (sales.js) dan void invoice kredit
 // (invoices.js) agar logika restock/HPP tidak menyimpang antar jalur.
 // Hanya qty yang belum pernah diretur yang dikembalikan (retur sudah menambah stok).
-const restoreSaleStock = async (client, sale, { userId = null, type = 'void' } = {}) => {
+const restoreSaleStock = async (client, sale, { userId = null, type = 'void', business = null } = {}) => {
   const { applyStockMovement } = require('./stock');
   const note = `Void ${sale.invoice_no}`;
   const items = await client.query('SELECT * FROM sale_items WHERE sale_id = $1', [sale.id]);
@@ -276,6 +306,7 @@ const restoreSaleStock = async (client, sale, { userId = null, type = 'void' } =
           unitCost: Number(component.cost_price),
           note,
           userId,
+          business: business || sale.business || null,
           allowNegative: true,
         });
       }
@@ -293,6 +324,7 @@ const restoreSaleStock = async (client, sale, { userId = null, type = 'void' } =
       unitCost: Math.round(item.cost_price / (item.base_qty / item.qty)),
       note,
       userId,
+      business: business || sale.business || null,
       allowNegative: true,
     });
   }
@@ -306,6 +338,7 @@ module.exports = {
   listSaleItemBatches,
   recordSaleItemBatch,
   recordShortfall,
+  consumeShortfall,
   restoreSaleItemBatches,
   restoreSaleStock,
 };

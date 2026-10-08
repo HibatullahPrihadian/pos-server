@@ -307,8 +307,9 @@ Izin dimuat dari DB **per request**, jadi cabut/beri izin langsung berlaku tanpa
 | Preset | Izin |
 |---|---|
 | **admin** | semua |
-| **kasir** | `pos.use`, `shift.use`, `attendance.self`, `product.view`, `stock.view`, `member.manage` |
+| **kasir** | `pos.use`, `shift.use`, `attendance.self`, `product.view`, `stock.view`, `member.manage`, `invoice.view`, `print.use` |
 | **gudang** | `pos.use`, `shift.use`, `attendance.self`, `product.view`, `product.manage`, `stock.view`, `stock.manage`, `purchase.view`, `purchase.manage` |
+| **operator** (fotokopi) | `print.use`, `print.report`, `report.view`, `attendance.self`, `shift.use` |
 
 Gudang **boleh jualan di POS** dan terima PO, tetapi **tidak** boleh bayar ke supplier
 (`purchase.pay`), kelola supplier/konsinyasi/paket/promo/beban, atau mengakses laporan,
@@ -318,10 +319,19 @@ Daftar kunci izin (`backend/utils/permissions.js`, diekspos lewat `GET /api/user
 
 `pos.use`, `shift.use`, `attendance.self`, `product.view`, `product.manage`, `stock.view`,
 `stock.manage`, `purchase.view`, `purchase.manage`, `purchase.pay`, `supplier.manage`,
-`consignment.manage`, `bundle.manage`, `promotion.manage`, `member.manage`, `expense.manage`,
+`consignment.manage`, `bundle.manage`, `promotion.manage`, `member.manage`,
+`customer.manage`, `invoice.view`, `invoice.manage`, `expense.manage`,
+`print.use`, `print.manage`, `print.report`,
 `report.view`, `user.manage`, `settings.manage`.
 
 Izin akhir dapat diatur per user via checkbox di halaman **Pengguna**.
+
+> Catatan baca-vs-tulis: endpoint `GET` daftar/detail dilindungi izin lihat
+> (`product.view`, `stock.view`, `purchase.view`, `pos.use`, `shift.use`,
+> `member.manage`/`pos.use` untuk member, `settings` baca publik untuk POS);
+> mutasi (`POST/PUT/DELETE`, terima PO, bayar, opname post) butuh izin kelola
+> (`product.manage`, `stock.manage`, `purchase.manage`/`purchase.pay`, dst).
+> Checkout mendukung header idempotensi `X-Idempotency-Key` agar retry aman.
 
 ---
 

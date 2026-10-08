@@ -9,6 +9,15 @@ const { logAudit } = require('../utils/audit');
 
 const router = express.Router();
 
+// Email pelanggan: format dasar saja (konsisten dengan member).
+const assertValidEmail = (value) => {
+  const email = cleanString(value, 120);
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new HttpError(400, 'Email tidak valid');
+  }
+  return email;
+};
+
 // Tanggal "hari ini" menurut zona waktu toko (konsisten dengan modul laporan).
 const TODAY_SQL = `(CURRENT_TIMESTAMP AT TIME ZONE '${APP_TIMEZONE}')::date`;
 
@@ -41,7 +50,7 @@ router.get('/', requirePermission('invoice.manage', 'invoice.view', 'customer.ma
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
     const search = cleanString(req.query.search, 150);
-    const activeOnly = req.query.is_active === undefined ? false : toBool(req.query.is_active, false);
+    const activeOnly = req.query.is_active === undefined ? true : toBool(req.query.is_active, true);
 
     // Pisahkan pelanggan per usaha; tanpa header, default 'minimarket' = perilaku lama.
     const conditions = ['business = $1'];
@@ -80,7 +89,7 @@ router.get('/', requirePermission('invoice.manage', 'invoice.view', 'customer.ma
   }
 });
 
-router.get('/:id', requirePermission('invoice.manage', 'invoice.view', 'customer.manage'), async (req, res, next) => {
+router.get('/:id', requirePermission('invoice.manage', 'invoice.view', 'customer.manage', 'print.use'), async (req, res, next) => {
   try {
     const result = await pool.query('SELECT * FROM customers WHERE id = $1 AND business = $2', [req.params.id, req.business]);
     if (!result.rows[0]) throw new HttpError(404, 'Pelanggan tidak ditemukan');
@@ -163,7 +172,7 @@ router.post('/', requirePermission('customer.manage'), async (req, res, next) =>
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [
         code, name.value, cleanString(req.body?.contact_name, 150), cleanString(req.body?.phone, 50),
-        cleanString(req.body?.email, 120), cleanString(req.body?.address, 1000), cleanString(req.body?.npwp, 50),
+        assertValidEmail(req.body?.email), cleanString(req.body?.address, 1000), cleanString(req.body?.npwp, 50),
         termDays, creditLimit, req.business,
       ]
     );
@@ -194,7 +203,7 @@ router.put('/:id', requirePermission('customer.manage'), async (req, res, next) 
        WHERE id = $10 AND business = $11 RETURNING *`,
       [
         name.value, cleanString(req.body?.contact_name, 150), cleanString(req.body?.phone, 50),
-        cleanString(req.body?.email, 120), cleanString(req.body?.address, 1000), cleanString(req.body?.npwp, 50),
+        assertValidEmail(req.body?.email), cleanString(req.body?.address, 1000), cleanString(req.body?.npwp, 50),
         termDays, creditLimit, isActive, req.params.id, req.business,
       ]
     );

@@ -57,6 +57,16 @@ const Settings = () => {
   const uploadQris = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
+      toast.error('Tipe file harus gambar (jpg, png, webp, gif)');
+      event.target.value = '';
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Ukuran file maksimal 5MB');
+      event.target.value = '';
+      return;
+    }
     setUploading(true);
     try {
       const formData = new FormData();

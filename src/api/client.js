@@ -48,8 +48,8 @@ const parse = async (res) => {
   }
 };
 
-export const request = async (method, path, { body, params, isForm, signal } = {}) => {
-  const headers = {};
+export const request = async (method, path, { body, params, isForm, signal, headers: extraHeaders } = {}) => {
+  const headers = { ...extraHeaders };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   headers['X-Business'] = getBusiness();
@@ -78,10 +78,10 @@ export const request = async (method, path, { body, params, isForm, signal } = {
 
 export const api = {
   get: (path, params, options) => request('GET', path, { params, ...options }),
-  post: (path, body) => request('POST', path, { body }),
-  put: (path, body) => request('PUT', path, { body }),
-  del: (path) => request('DELETE', path),
-  upload: (path, formData) => request('POST', path, { body: formData, isForm: true }),
+  post: (path, body, options) => request('POST', path, { body, ...options }),
+  put: (path, body, options) => request('PUT', path, { body, ...options }),
+  del: (path, options) => request('DELETE', path, { ...options }),
+  upload: (path, formData, options) => request('POST', path, { body: formData, isForm: true, ...options }),
 };
 
 // Unduh CSV dari endpoint report/produk dengan menyertakan header JWT.

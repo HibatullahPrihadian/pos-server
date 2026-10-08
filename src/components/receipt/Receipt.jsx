@@ -96,7 +96,7 @@ const Receipt = ({ sale, settings, change = 0, title = 'STRUK PEMBELIAN' }) => {
         )}
         {Number(sale.tax_total) > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>PPN (incl.)</span>
+            <span>PPN {store.tax_included !== false ? '(incl.)' : '(excl.)'}</span>
             <span>{formatCurrency(sale.tax_total)}</span>
           </div>
         )}

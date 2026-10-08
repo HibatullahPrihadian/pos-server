@@ -252,6 +252,10 @@ router.post('/manual', requirePermission('user.manage'), async (req, res, next) 
        RETURNING *`,
       [userId, workDate || null, checkIn, checkOut, shiftId, note]
     );
+    if (result.rows[0]?.check_in && result.rows[0]?.check_out
+      && new Date(result.rows[0].check_out) <= new Date(result.rows[0].check_in)) {
+      throw new HttpError(400, 'Jam pulang harus setelah jam masuk');
+    }
 
     await logAudit(pool, {
       userId: req.user.id,

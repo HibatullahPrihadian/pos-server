@@ -271,7 +271,9 @@ const Purchases = () => {
 
   const submitPayment = async () => {
     try {
-      await api.post(`/api/purchases/${detail.id}/payment`, { amount: parseMoney(paymentAmount) });
+      const amount = parseMoney(paymentAmount);
+      if (amount <= 0) return toast.warning('Jumlah bayar harus lebih dari 0');
+      await api.post(`/api/purchases/${detail.id}/payment`, { amount });
       toast.success('Pembayaran dicatat');
       setPaymentOpen(false);
       setPaymentAmount('');
@@ -612,7 +614,7 @@ const Purchases = () => {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="neutral" onClick={() => { setPaymentOpen(false); setDetail(null); }}>Batal</Button>
-            <Button onClick={submitPayment} disabled={!paymentAmount}><CreditCard size={16} /> Bayar</Button>
+            <Button onClick={submitPayment} disabled={parseMoney(paymentAmount) <= 0}><CreditCard size={16} /> Bayar</Button>
           </div>
         }
       >

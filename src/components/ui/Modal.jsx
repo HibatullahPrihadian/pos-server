@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { X } from 'lucide-react';
 
 const SIZES = {
@@ -8,6 +9,21 @@ const SIZES = {
 };
 
 const Modal = ({ isOpen, onClose, title, children, footer, size = 'md' }) => {
+  // Esc global per modal agar konsisten (POS mengandalkan cascade; halaman lain
+  // sebelumnya tak merespons Esc sama sekali). Stop propagation agar modal
+  // bertumpuk menutup satu per satu.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose?.();
+      }
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (

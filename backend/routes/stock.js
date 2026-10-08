@@ -16,7 +16,7 @@ const router = express.Router();
 // =========================================================
 // Kartu stok / mutasi
 // =========================================================
-router.get('/movements', async (req, res, next) => {
+router.get('/movements', requirePermission('stock.view'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 50 });
     const productId = toInt(req.query.product_id, 0);
@@ -69,7 +69,7 @@ router.get('/movements', async (req, res, next) => {
   }
 });
 
-router.get('/low', async (req, res, next) => {
+router.get('/low', requirePermission('stock.view'), async (req, res, next) => {
   try {
     const result = await pool.query(
       `SELECT p.id, p.sku, p.name, p.base_unit, p.stock_qty, p.min_stock,
@@ -90,7 +90,7 @@ router.get('/low', async (req, res, next) => {
 // Batch & kadaluarsa
 // =========================================================
 // Daftar batch dengan filter produk/hari-kadaluarsa.
-router.get('/batches', async (req, res, next) => {
+router.get('/batches', requirePermission('stock.view'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 50 });
     const productId = toInt(req.query.product_id, 0);
@@ -140,7 +140,7 @@ router.get('/batches', async (req, res, next) => {
 });
 
 // Batch yang kadaluarsa dalam ambang peringatan (untuk dashboard).
-router.get('/expiring', async (req, res, next) => {
+router.get('/expiring', requirePermission('stock.view'), async (req, res, next) => {
   try {
     const settings = await getSettings();
     const warningDays = toInt(req.query.within_days, 0) || settings?.expiry_warning_days || 180;
@@ -295,7 +295,7 @@ router.post('/adjustments', requirePermission('stock.manage'), async (req, res, 
 // =========================================================
 // Stok opname
 // =========================================================
-router.get('/opnames', async (req, res, next) => {
+router.get('/opnames', requirePermission('stock.view'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
     const status = cleanString(req.query.status, 10);
@@ -326,7 +326,7 @@ router.get('/opnames', async (req, res, next) => {
   }
 });
 
-router.get('/opnames/:id', async (req, res, next) => {
+router.get('/opnames/:id', requirePermission('stock.view'), async (req, res, next) => {
   try {
     const opname = await pool.query(
       `SELECT so.*, u.full_name AS user_name FROM stock_opnames so

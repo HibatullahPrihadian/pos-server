@@ -4,7 +4,9 @@ const multer = require('multer');
 const { HttpError } = require('../middleware/error');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || 'uploads';
-const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB || 5);
+const parsedMaxMb = Number(process.env.MAX_UPLOAD_MB ?? 5);
+// Env rusak (NaN/<=0) jangan jadi tanpa-batas: fallback aman 5MB.
+const MAX_UPLOAD_MB = Number.isFinite(parsedMaxMb) && parsedMaxMb > 0 ? parsedMaxMb : 5;
 
 const uploadRoot = path.isAbsolute(UPLOAD_DIR)
   ? UPLOAD_DIR

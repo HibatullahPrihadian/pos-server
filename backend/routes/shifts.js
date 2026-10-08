@@ -33,7 +33,18 @@ const buildSummary = async (runner, shift) => {
   const cashRefunds = await runner.query(
     `SELECT COALESCE(SUM(r.total), 0)::bigint AS cash_out
      FROM returns r
-     WHERE r.shift_id = $1 AND r.refund_method = 'cash'`,
+     JOIN sales s ON s.id = r.sale_id
+     WHERE s.shift_id = $1 AND r.refund_method = 'cash' AND s.status = 'completed'`,
+    [shift.id]
+  );
+
+  // Uang muka kredit (DP tunai) + cicilan piutang tunai menambah kas fisik di
+  // tangan, walau tidak lewat sale_payments. Tanpa ini expected surplus palsu.
+  const creditCash = await runner.query(
+    `SELECT COALESCE(SUM(ip.amount), 0)::bigint AS dp_in
+     FROM invoice_payments ip
+     JOIN sales s ON s.id = ip.sale_id
+     WHERE s.shift_id = $1 AND s.status = 'completed' AND ip.method = 'cash'`,
     [shift.id]
   );
 
@@ -47,7 +58,7 @@ const buildSummary = async (runner, shift) => {
   );
 
   const openingCash = Number(shift.opening_cash);
-  const cashIn = Number(cashPayments.rows[0].cash_in);
+  const cashIn = Number(cashPayments.rows[0].cash_in) + Number(creditCash.rows[0].dp_in);
   const cashOut = Number(cashRefunds.rows[0].cash_out);
   const expectedCash = openingCash + cashIn - cashOut;
 
@@ -63,7 +74,7 @@ const buildSummary = async (runner, shift) => {
   };
 };
 
-router.get('/current', async (req, res, next) => {
+router.get('/current', requirePermission('shift.use'), async (req, res, next) => {
   try {
     const result = await pool.query(
       `SELECT * FROM shifts WHERE user_id = $1 AND business = $2 AND closed_at IS NULL
@@ -154,7 +165,7 @@ router.post('/close', requirePermission('shift.use'), async (req, res, next) => 
   }
 });
 
-router.get('/', async (req, res, next) => {
+router.get('/', requirePermission('shift.use'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
     const from = cleanString(req.query.from, 10);
@@ -192,7 +203,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/:id/summary', async (req, res, next) => {
+router.get('/:id/summary', requirePermission('shift.use'), async (req, res, next) => {
   try {
     const result = await pool.query(
       `SELECT sh.*, u.full_name AS user_name FROM shifts sh

@@ -1,6 +1,7 @@
 // Cetak struk dengan halaman 58mm x tinggi konten (kertas termal).
 // Ukuran halaman disisipkan sesaat sebelum print agar cetak A4 (invoice,
-// laporan, label) tidak ikut berubah; dibersihkan lewat afterprint.
+// laporan, label) tidak ikut berubah. Cleanup ganda: afterprint + timeout,
+// karena cancel dialog di sebagian browser tidak memicu afterprint.
 export function printReceipt() {
   document.getElementById('receipt-page-size')?.remove();
 
@@ -16,6 +17,12 @@ export function printReceipt() {
     : '@page { size: 58mm auto; margin: 0 }';
   document.head.appendChild(style);
 
-  window.addEventListener('afterprint', () => style.remove(), { once: true });
+  window.addEventListener('afterprint', () => {
+    clearTimeout(fallback);
+    style.remove();
+  }, { once: true });
+  // Cancel dialog (tanpa afterprint): kembalikan @page agar cetak A4 berikut
+  // tidak terpotong ukuran struk.
+  const fallback = setTimeout(() => style.remove(), 5000);
   window.print();
 }

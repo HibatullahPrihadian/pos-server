@@ -182,7 +182,7 @@ const Members = () => {
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <Input label="Perubahan (+/-)" type="number" value={adjustForm.change} onChange={(e) => setAdjustForm({ ...adjustForm, change: e.target.value })} placeholder="10" />
                 <Input label="Catatan" className="col-span-2" value={adjustForm.note} onChange={(e) => setAdjustForm({ ...adjustForm, note: e.target.value })} />
-                <Button className="col-span-3" onClick={adjustPoints} disabled={!adjustForm.change}>Sesuaikan Poin</Button>
+                <Button className="col-span-3" onClick={adjustPoints} disabled={Number(adjustForm.change) === 0 || adjustForm.change === ''}>Sesuaikan Poin</Button>
               </div>
             )}
 

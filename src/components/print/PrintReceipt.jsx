@@ -15,6 +15,8 @@ export const PAYMENT_STATUS_LABELS = {
 };
 
 // Nota pesanan fotokopi (layout struk termal, pola sama dengan Receipt POS).
+// ID sengaja sama dengan Receipt POS karena keduanya tak pernah mount bersamaan
+// (halaman POS vs halaman fotokopi); printReceipt memakai elemen pertama.
 const PrintReceipt = ({ order, settings }) => {
   if (!order) return null;
   const store = settings || {};

@@ -2,8 +2,10 @@ import { createContext, useContext, useState, useCallback, useMemo } from 'react
 
 const CartContext = createContext();
 
-// Item keranjang: { product_id, unit_id, unit_name, name, sku, price, qty, discount, stock_available, conversion_factor }
-// Item paket: { bundle_id, name, sku, price, qty, discount, is_bundle: true }
+// Batas qty per baris selaras BE (MAX_LINE_QTY) agar angka raksasa tidak tampil
+// ngawur sebelum ditolak server.
+const MAX_LINE_QTY = 100000;
+const clampQty = (qty) => Math.max(0, Math.min(MAX_LINE_QTY, Math.round(Number(qty) || 0)));
 const CartProvider = ({ children }) => {
   const [items, setItems] = useState([]);
   const [member, setMember] = useState(null);
@@ -31,7 +33,7 @@ const CartProvider = ({ children }) => {
       const key = keyOf(line);
       const existing = prev.find((i) => keyOf(i) === key);
       if (existing) {
-        return prev.map((i) => (keyOf(i) === key ? { ...i, qty: i.qty + qty } : i));
+        return prev.map((i) => (keyOf(i) === key ? { ...i, qty: clampQty(i.qty + qty) } : i));
       }
       return [...prev, line];
     });
@@ -53,7 +55,7 @@ const CartProvider = ({ children }) => {
       const key = keyOf(line);
       const existing = prev.find((i) => keyOf(i) === key);
       if (existing) {
-        return prev.map((i) => (keyOf(i) === key ? { ...i, qty: i.qty + qty } : i));
+        return prev.map((i) => (keyOf(i) === key ? { ...i, qty: clampQty(i.qty + qty) } : i));
       }
       return [...prev, line];
     });
@@ -63,7 +65,7 @@ const CartProvider = ({ children }) => {
     const key = `${productId}:${unitId || 'base'}`;
     setItems((prev) =>
       prev
-        .map((i) => (keyOf(i) === key ? { ...i, qty: Math.max(0, qty) } : i))
+        .map((i) => (keyOf(i) === key ? { ...i, qty: clampQty(qty) } : i))
         .filter((i) => i.qty > 0)
     );
   }, []);
@@ -72,7 +74,7 @@ const CartProvider = ({ children }) => {
   const updateQtyByKey = useCallback((key, qty) => {
     setItems((prev) =>
       prev
-        .map((i) => (keyOf(i) === key ? { ...i, qty: Math.max(0, qty) } : i))
+        .map((i) => (keyOf(i) === key ? { ...i, qty: clampQty(qty) } : i))
         .filter((i) => i.qty > 0)
     );
   }, []);

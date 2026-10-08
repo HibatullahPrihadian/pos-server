@@ -23,8 +23,12 @@ export const AuthProvider = ({ children }) => {
       const me = await api.get('/api/auth/me');
       setUser(me);
       return me;
-    } catch {
-      logout();
+    } catch (err) {
+      // 401 = token mati: logout. 403 (mis. business mismatch di tab baru)
+      // bukan token mati: jangan buang token, biarkan pemilih usaha/route guard
+      // yang menangani agar tidak logout paksa.
+      if (err?.status === 401) logout();
+      else setUser(null);
       return null;
     } finally {
       setLoading(false);

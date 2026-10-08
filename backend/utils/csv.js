@@ -1,8 +1,10 @@
 const Papa = require('papaparse');
 
-// Parse CSV text menjadi array objek (baris kosong diabaikan).
+// Parse CSV text menjadi array objek (baris kosong diabaikan). BOM dikupas agar
+// header dari Excel UTF-8 tidak terbaca sebagai "\uFEFFkolom".
 const parseCsv = (text) => {
-  const result = Papa.parse(String(text || ''), {
+  const cleaned = String(text || '').replace(/^\uFEFF/, '');
+  const result = Papa.parse(cleaned, {
     header: true,
     skipEmptyLines: true,
     transformHeader: (h) => String(h).trim(),

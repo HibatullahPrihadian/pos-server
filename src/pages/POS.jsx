@@ -430,11 +430,18 @@ const POS = () => {
   // klik/Enter kedua yang datang sebelum re-render berikutnya.
   const submittingRef = useRef(false);
 
+  // Idempotency-key per sesi checkout: retry jaringan / double-submit memakai
+  // kunci yang sama sehingga BE mengembalikan invoice yang sudah dibuat.
+  const idemKeyRef = useRef(null);
+
   const checkout = async () => {
     if (submittingRef.current) return;
     if (creditMode && !customerId) return toast.warning('Pilih pelanggan grosir untuk penjualan kredit');
     submittingRef.current = true;
     setSubmitting(true);
+    if (!idemKeyRef.current) {
+      idemKeyRef.current = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+    }
     try {
       const payload = {
         shift_id: shift.id,
@@ -460,12 +467,22 @@ const POS = () => {
           .map((p) => ({ method: p.method, amount: parseMoney(p.amount), reference: p.reference })),
       };
 
-      const result = await api.post('/api/sales', payload);
-      const full = await api.get(`/api/sales/${result.sale.id}`);
+      const result = await api.post('/api/sales', payload, {
+        headers: { 'X-Idempotency-Key': idemKeyRef.current },
+      });
+      let full;
+      try {
+        full = await api.get(`/api/sales/${result.sale.id}`);
+      } catch {
+        // GET detail gagal (jaringan): transaksi SUDAH tersimpan. Jangan biarkan
+        // kasir mengulang checkout — tampilkan struk dari hasil POST langsung.
+        full = result.sale;
+      }
 
       setReceiptSale(full);
       setReceiptChange(result.change);
       setPayOpen(false);
+      idemKeyRef.current = null;
       cart.clear();
       setDiscountEditorKey(null);
       setSelectedItemKey(null);
@@ -693,6 +710,16 @@ const POS = () => {
         return;
       }
 
+      // Klaim hold di server DULU (tandai resumed) sebelum menimpa cart lokal,
+      // agar dua terminal tak bisa mengambil hold yang sama. 409 = kalah balapan.
+      try {
+        await api.del(`/api/holds/${hold.id}?reason=resume`);
+      } catch (err) {
+        toast.error(err.message || 'Hold sudah diambil terminal lain');
+        loadHolds();
+        return;
+      }
+
       // Hidrasi cart dari snapshot hold (referensi + qty + discount).
       // Harga di-requote oleh quote effect; server tetap otoritatif di checkout.
       const items = usable.map((i) => (
@@ -738,7 +765,6 @@ const POS = () => {
       });
       setDiscountEditorKey(null);
 
-      await api.del(`/api/holds/${hold.id}?reason=resume`);
       setHoldsOpen(false);
       setConfirmResume(null);
       if (goneCount > 0) toast.warning(`${goneCount} item hold tidak lagi tersedia dan dilewati`);
@@ -813,19 +839,21 @@ const POS = () => {
       setDueDate('');
       setPayOpen(true);
     },
-    H: openHoldModal,
-    A: openHoldsList,
+    // Huruf tunggal nonaktif saat struk tampil (guard di openHoldModal/openHoldsList
+    // hanya cegah modal ganda, bukan modal di balik struk).
+    H: () => { if (!receiptSale) openHoldModal(); },
+    A: () => { if (!receiptSale) openHoldsList(); },
     M: () => { if (shift && !cartOverlaysOpen) setMemberModal(true); },
-    C: () => { if (shift && cart.items.length > 0) setClearCartOpen(true); },
+    C: () => { if (!receiptSale && shift && cart.items.length > 0) setClearCartOpen(true); },
     K: () => { if (shift && !cartOverlaysOpen) setScanOpen(true); },
     'Alt+H': openHoldModal,
     'Alt+A': openHoldsList,
     'Alt+M': () => { if (shift && !cartOverlaysOpen) setMemberModal(true); },
     'Alt+C': () => { if (shift && cart.items.length > 0 && !cartOverlaysOpen) setClearCartOpen(true); },
     'Alt+K': () => { if (shift && !cartOverlaysOpen) setScanOpen(true); },
-    '+': () => adjustSelectedQty(1),
-    '=': () => adjustSelectedQty(1),
-    '-': () => adjustSelectedQty(-1),
+    '+': () => { if (!receiptSale) adjustSelectedQty(1); },
+    '=': () => { if (!receiptSale) adjustSelectedQty(1); },
+    '-': () => { if (!receiptSale) adjustSelectedQty(-1); },
     Escape: () => {
       if (confirmResume) setConfirmResume(null);
       else if (clearCartOpen) setClearCartOpen(false);
@@ -862,10 +890,18 @@ const POS = () => {
 
   const paidTotal = payments.reduce((sum, p) => sum + parseMoney(p.amount), 0);
   const change = paidTotal - estimatedTotal;
-  const maxRedeemable = Math.min(
-    cart.member?.points || 0,
-    Math.floor(cart.totals.afterTxn / Number(settings?.point_value_rupiah || 1))
-  );
+  // Samakan aturan BE (sales.js): minimal penukaran + nilai poin 0 = tak bisa tukar.
+  const pointValue = Number(settings?.point_value_rupiah || 0);
+  const minRedeem = Number(settings?.point_min_redeem || 0);
+  const maxRedeemable = !cart.member || pointValue <= 0
+    ? 0
+    : Math.max(0, Math.min(
+      cart.member.points || 0,
+      Math.floor(cart.totals.afterTxn / pointValue),
+    ));
+  const redeemBlocked = cart.member && pointValue > 0 && (cart.member.points || 0) >= minRedeem && maxRedeemable < minRedeem
+    ? `Minimal penukaran ${minRedeem} poin`
+    : null;
 
   if (shiftLoading) {
     return <div className="py-20 text-center text-slate-400">Memuat shift...</div>;
@@ -1114,10 +1150,11 @@ const POS = () => {
             <span className="text-slate-400">Diskon Transaksi</span>
             <input
               type="number"
+              min={0}
               className="w-28 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-sm text-white text-right"
               value={cart.txnDiscount || ''}
               placeholder="0"
-              onChange={(e) => cart.setTxnDiscount(parseMoney(e.target.value))}
+              onChange={(e) => cart.setTxnDiscount(Math.max(0, parseMoney(e.target.value)))}
             />
           </div>
           {cart.member && maxRedeemable > 0 && (
@@ -1125,12 +1162,18 @@ const POS = () => {
               <span className="text-slate-400">Tukar Poin (maks {maxRedeemable})</span>
               <input
                 type="number"
+                min={0}
                 className="w-28 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-sm text-white text-right"
                 value={cart.redeemPoints || ''}
                 placeholder="0"
                 max={maxRedeemable}
-                onChange={(e) => cart.setRedeemPoints(Math.min(maxRedeemable, parseQty(e.target.value)))}
+                onChange={(e) => cart.setRedeemPoints(Math.max(0, Math.min(maxRedeemable, parseQty(e.target.value))))}
               />
+            </div>
+          )}
+          {redeemBlocked && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-ios-orange">{redeemBlocked}</span>
             </div>
           )}
           {cart.redeemPoints > 0 && (
@@ -1140,7 +1183,7 @@ const POS = () => {
             </div>
           )}
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-slate-400">PPN {taxIncluded ? '(incl.)' : ''}</span>
+            <span className="text-slate-400">PPN {taxIncluded ? '(incl.)' : '(excl.)'}</span>
             <span className="text-white">{formatCurrency(estimatedTax)}</span>
           </div>
         </div>

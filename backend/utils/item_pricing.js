@@ -90,7 +90,9 @@ const resolveItemsEffectivePricing = async (client, { items, isMember }) => {
     const promoId = bestPromo && bestPromo.price === effectivePrice && effectivePrice < basePrice
       ? bestPromo.promo.id
       : null;
-    const tierId = !promoId && tier && tier.price === effectivePrice && effectivePrice < basePrice
+    // Promo dan tier seri pada harga yang sama: catat keduanya agar badge
+    // grosir tidak hilang (kolom sale_items.promo_id + tier_id independen).
+    const tierId = tier && tier.price === effectivePrice && effectivePrice < basePrice
       ? tier.tier.id
       : null;
 

@@ -21,7 +21,7 @@ const RETURN_SELECT = `
   LEFT JOIN users u ON u.id = r.user_id
 `;
 
-router.get('/', async (req, res, next) => {
+router.get('/', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const { page, limit, offset } = getPagination(req.query, { defaultLimit: 25 });
     const from = cleanString(req.query.from, 10);
@@ -61,7 +61,7 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-router.get('/:id', async (req, res, next) => {
+router.get('/:id', requirePermission('pos.use'), async (req, res, next) => {
   try {
     const result = await pool.query(
       `${RETURN_SELECT} JOIN sales s ON s.id = r.sale_id WHERE r.id = $1 AND s.business = $2`,
@@ -93,7 +93,12 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
 
     const refundMethod = req.body?.refund_method === 'transfer' ? 'transfer' : 'cash';
     const reason = cleanString(req.body?.reason, 300);
+    // Retur kas wajib terikat shift aktif agar kas shift terkoreksi. Tanpa ini
+    // expected_cash selisih palsu (cash_out hanya hitung retur ber-shift).
     const shiftId = toInt(req.body?.shift_id, 0) || null;
+    if (refundMethod === 'cash' && !shiftId) {
+      throw new HttpError(400, 'Retur tunai wajib menyertakan shift_id aktif');
+    }
 
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     if (items.length === 0) throw new HttpError(400, 'Item retur wajib diisi');

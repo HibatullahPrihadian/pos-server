@@ -249,6 +249,12 @@ router.post('/:id/void', requirePermission('invoice.manage'), async (req, res, n
       const sale = saleResult.rows[0];
       if (!sale) throw new HttpError(404, 'Invoice tidak ditemukan');
       if (sale.status === 'void') throw new HttpError(400, 'Invoice sudah di-void');
+      // Pembayaran yang sudah masuk adalah kas fisik di tangan. Void tanpa
+      // mengembalikan uang tunai akan menghapus piutang sekaligus menghilangkan
+      // jejak kas — tolak dan minta pengembalian kas manual lebih dulu.
+      if (Number(sale.paid_amount) > 0) {
+        throw new HttpError(400, 'Invoice sudah dibayar sebagian/lunas, tidak dapat di-void. Catat pengembalian kas manual lebih dulu.');
+      }
 
       // Void mengembalikan stok DAN membatalkan piutang. Pembayaran yang sudah
       // tercatat tetap tersimpan sebagai jejak di invoice_payments; invoice tidak

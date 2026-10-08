@@ -50,16 +50,26 @@ const nextInternalBarcode = async (client, prefix = INTERNAL_PREFIX) => {
   return generateEan13(p);
 };
 
-// Cek apakah kode sudah dipakai paket lain (opsional exclude id saat update).
+// Cek apakah kode sudah dipakai paket lain ATAU produk (lintas tabel), agar scan
+// tidak ambigu (opsional exclude id paket saat update).
 const isBarcodeTaken = async (client, barcode, excludeId = null) => {
+  if (!barcode) return false;
   const params = [barcode];
   let sql = 'SELECT 1 FROM bundles WHERE barcode = $1';
   if (excludeId !== null && excludeId !== undefined) {
     params.push(excludeId);
     sql += ' AND id <> $2';
   }
-  const result = await client.query(`${sql} LIMIT 1`, params);
-  return result.rowCount > 0;
+  const bundleHit = await client.query(`${sql} LIMIT 1`, params);
+  if (bundleHit.rowCount > 0) return true;
+  const productHit = await client.query(
+    `SELECT 1 FROM products WHERE barcode = $1
+     UNION SELECT 1 FROM product_units WHERE barcode = $1
+     UNION SELECT 1 FROM product_barcodes WHERE barcode = $1
+     LIMIT 1`,
+    [barcode]
+  );
+  return productHit.rowCount > 0;
 };
 
 module.exports = {

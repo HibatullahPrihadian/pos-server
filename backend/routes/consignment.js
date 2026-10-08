@@ -22,7 +22,7 @@ const resolveRange = (query) => {
   };
 };
 
-// Hutang berjalan per penitip (harga setor):
+// Hutang berjalan per penitip (harga setor), difilter usaha pemanggil ($1):
 //   SUM(sale_items.cost_price * qty) untuk produk konsinyasi (completed, neto retur)
 //   dikurangi SUM(consignment_payouts.amount).
 // cost_price tersimpan per satuan jual, jadi dikalikan qty (bukan base_qty).
@@ -40,12 +40,13 @@ const PAYABLE_SQL = `
     FROM sale_items si
     JOIN sales s ON s.id = si.sale_id
     JOIN products p ON p.id = si.product_id
-    WHERE s.status = 'completed' AND p.is_consignment = TRUE AND p.consignor_id IS NOT NULL
+    WHERE s.status = 'completed' AND s.business = $1 AND p.is_consignment = TRUE AND p.consignor_id IS NOT NULL
     GROUP BY p.consignor_id
   ) sold ON sold.consignor_id = c.id
   LEFT JOIN (
     SELECT consignor_id, SUM(amount) AS total
     FROM consignment_payouts
+    WHERE business = $1
     GROUP BY consignor_id
   ) paid ON paid.consignor_id = c.id
 `;
@@ -227,7 +228,7 @@ router.get('/sales', async (req, res, next) => {
        JOIN sales s ON s.id = si.sale_id
        JOIN products p ON p.id = si.product_id
        LEFT JOIN consignors c ON c.id = p.consignor_id
-       WHERE s.status = 'completed' AND p.is_consignment = TRUE AND p.business = $3
+       WHERE s.status = 'completed' AND s.business = $3 AND p.is_consignment = TRUE AND p.business = $3
          AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
          ${filter}
        GROUP BY p.consignor_id, c.name
@@ -246,7 +247,7 @@ router.get('/sales', async (req, res, next) => {
        JOIN sales s ON s.id = si.sale_id
        JOIN products p ON p.id = si.product_id
        LEFT JOIN consignors c ON c.id = p.consignor_id
-       WHERE s.status = 'completed' AND p.is_consignment = TRUE AND p.business = $3
+       WHERE s.status = 'completed' AND s.business = $3 AND p.is_consignment = TRUE AND p.business = $3
          AND s.created_at >= $1::date AND s.created_at < ($2::date + INTERVAL '1 day')
          ${filter}
        GROUP BY p.id, p.sku, p.name, p.base_unit, c.name
@@ -349,12 +350,12 @@ router.post('/payouts', async (req, res, next) => {
              FROM sale_items si
              JOIN sales s ON s.id = si.sale_id
              JOIN products p ON p.id = si.product_id
-             WHERE s.status = 'completed' AND p.is_consignment = TRUE AND p.consignor_id = $1
+             WHERE s.status = 'completed' AND s.business = $2 AND p.is_consignment = TRUE AND p.consignor_id = $1
            ), 0)::bigint AS sold,
            COALESCE((
-             SELECT SUM(amount) FROM consignment_payouts WHERE consignor_id = $1
+             SELECT SUM(amount) FROM consignment_payouts WHERE consignor_id = $1 AND business = $2
            ), 0)::bigint AS paid`,
-        [consignorId]
+        [consignorId, req.business]
       );
       const payable = Number(payableResult.rows[0].sold) - Number(payableResult.rows[0].paid);
       if (amount > payable) {

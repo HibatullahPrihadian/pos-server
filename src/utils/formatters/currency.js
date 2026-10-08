@@ -16,15 +16,41 @@ export const formatNumber = (amount) => {
   return new Intl.NumberFormat('id-ID').format(numericAmount);
 };
 
-// Parse input pengguna menjadi integer rupiah.
+// Parse input pengguna menjadi integer rupiah. Format id-ID: titik = pemisah
+// ribuan, koma = desimal. "12.500" -> 12500, "12,5" -> 13 (round), "12.5" (titik
+// tunggal di ujung) -> 13. Tanda minus hanya di depan; kosong/invalid -> 0.
 export const parseMoney = (value) => {
-  const n = Math.round(Number(String(value ?? '').replace(/[^\d-]/g, '')));
-  return Number.isFinite(n) ? n : 0;
+  const raw = String(value ?? '').trim();
+  if (!raw) return 0;
+  const neg = raw.startsWith('-');
+  const digits = raw.replace(/[^\d.,]/g, '');
+  if (!digits) return 0;
+  let normalized = digits;
+  if (digits.includes(',')) {
+    normalized = digits.replace(/\./g, '').replace(',', '.');
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(digits)) {
+    normalized = digits.replace(/\./g, '');
+  }
+  const n = Math.round(Number(normalized));
+  if (!Number.isFinite(n)) return 0;
+  return neg ? -Math.abs(n) : n;
 };
 
 export const parseQty = (value) => {
-  const n = Math.round(Number(String(value ?? '').replace(/[^\d-]/g, '')));
-  return Number.isFinite(n) ? n : 0;
+  const raw = String(value ?? '').trim();
+  if (!raw) return 0;
+  const neg = raw.startsWith('-');
+  const digits = raw.replace(/[^\d.,]/g, '');
+  if (!digits) return 0;
+  let normalized = digits;
+  if (digits.includes(',')) {
+    normalized = digits.replace(/\./g, '').replace(',', '.');
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(digits)) {
+    normalized = digits.replace(/\./g, '');
+  }
+  const n = Math.round(Number(normalized));
+  if (!Number.isFinite(n)) return 0;
+  return neg ? -Math.abs(n) : n;
 };
 
 // Ubah angka menjadi terbilang bahasa Indonesia (maks. miliar).

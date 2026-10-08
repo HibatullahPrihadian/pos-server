@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import {
+import { Link, useNavigate } from 'react-router-dom';import {
   Plus, Eye, Printer, Pencil, Play, CheckCheck, XCircle, Wallet, RefreshCw,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
 import { useSettings } from '../context/SettingsContext';
+import useDebounce from '../hooks/useDebounce';
 import PageHeader from '../components/ui/PageHeader';
 import Card from '../components/ui/Card';
 import Table from '../components/ui/Table';
@@ -48,6 +48,7 @@ const PrintOrders = () => {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [loading, setLoading] = useState(true);
+  const debouncedSearch = useDebounce(filters.search, 350);
 
   const [detail, setDetail] = useState(null);
   const [paying, setPaying] = useState(null);
@@ -62,7 +63,7 @@ const PrintOrders = () => {
         page,
         status: filters.status,
         payment_status: filters.payment_status,
-        search: filters.search,
+        search: debouncedSearch,
         from: filters.from,
         to: filters.to,
       });
@@ -73,7 +74,8 @@ const PrintOrders = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, filters, toast]);
+  // search diketik mentah di input, query memakai versi debounce.
+  }, [page, filters.status, filters.payment_status, filters.from, filters.to, debouncedSearch, toast]);
 
   useEffect(() => { load(); }, [load]);
 
