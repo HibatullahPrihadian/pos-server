@@ -50,20 +50,16 @@ input[type='number'] {
 }
 
 /* =========================================================
-   Struk (58mm/80mm) - hanya area struk yang tercetak.
+   Struk (58mm) - hanya area struk yang tercetak.
    ========================================================= */
 .receipt-paper {
-  width: 72mm;
+  width: 54mm;
   padding: 3mm 2mm;
   background: #ffffff;
   color: #000000;
   font-family: 'Courier New', Courier, monospace;
   font-size: 10px;
   line-height: 1.35;
-}
-
-.receipt-paper.receipt-58 {
-  width: 54mm;
 }
 
 .receipt-sep {
@@ -99,6 +95,15 @@ input[type='number'] {
     margin: 0;
     padding: 0;
     background: #ffffff;
+  }
+
+  /* Card modal: backdrop-filter membuatnya containing block untuk
+     #receipt-print-area (abs), lalu overflow-hidden memotong struk pada
+     halaman 58mm. Matikan saat cetak agar clip berpindah ke overlay fixed
+     yang tidak punya overflow; layar tidak terpengaruh. */
+  .backdrop-blur-glass {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
   .no-print {

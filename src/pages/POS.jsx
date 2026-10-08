@@ -23,6 +23,7 @@ import useDebounce from '../hooks/useDebounce';
 import useHotkeys from '../hooks/useHotkeys';
 import { formatCurrency, parseMoney, parseQty } from '../utils/formatters';
 import { resolveBarcode as lookupBarcode } from '../utils/barcode';
+import { printReceipt } from '../utils/printReceipt';
 
 const PAY_METHODS = [
   { key: 'cash', label: 'Tunai', icon: Banknote },
@@ -480,8 +481,6 @@ const POS = () => {
       setSubmitting(false);
     }
   };
-
-  const printReceipt = () => window.print();
 
   // ---------- Navigasi keyboard dropdown pencarian ----------
   const handleSearchKeyDown = (event) => {

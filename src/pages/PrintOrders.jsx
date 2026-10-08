@@ -17,6 +17,7 @@ import Pagination from '../components/ui/Pagination';
 import Spinner from '../components/ui/Spinner';
 import PrintReceipt, { PRINT_STATUS_LABELS, PAYMENT_STATUS_LABELS } from '../components/print/PrintReceipt';
 import { formatCurrency, formatDateTime } from '../utils/formatters';
+import { printReceipt } from '../utils/printReceipt';
 
 const STATUS_TONES = {
   queued: 'orange',
@@ -289,7 +290,7 @@ const PrintOrders = () => {
         title={`Pesanan ${detail?.code || ''}`}
         footer={detail && (
           <div className="flex flex-wrap justify-end gap-2">
-            <Button variant="neutral" onClick={() => window.print()}>
+            <Button variant="neutral" onClick={printReceipt}>
               <Printer size={16} /> Cetak Nota
             </Button>
             {detail.payment_status !== 'paid' && detail.status !== 'cancelled' && (

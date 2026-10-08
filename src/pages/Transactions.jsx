@@ -16,6 +16,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import Receipt from '../components/receipt/Receipt';
 import { formatDateTime, formatCurrency, parseQty, todayIso, firstOfMonthIso } from '../utils/formatters';
 import { PAYMENT_LABELS, SALE_STATUS_LABELS } from '../utils/labels';
+import { printReceipt } from '../utils/printReceipt';
 
 const Transactions = () => {
   const toast = useToastContext();
@@ -316,7 +317,7 @@ const Transactions = () => {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="neutral" onClick={() => setReceiptView(false)}>Tutup</Button>
-            <Button onClick={() => window.print()}><Printer size={16} /> Cetak</Button>
+            <Button onClick={printReceipt}><Printer size={16} /> Cetak</Button>
           </div>
         }
       >

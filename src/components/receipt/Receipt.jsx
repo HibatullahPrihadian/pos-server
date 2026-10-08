@@ -1,9 +1,9 @@
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { PAYMENT_LABELS } from '../../utils/labels';
 
-// Layout struk untuk printer thermal 58/80mm. `sale` diharapkan membawa
+// Layout struk untuk printer termal 58mm. `sale` diharapkan membawa
 // items[], payments[], cashier_name, dan (opsional) change.
-const Receipt = ({ sale, settings, change = 0, title = 'STRUK PEMBELIAN', paperWidth = '80' }) => {
+const Receipt = ({ sale, settings, change = 0, title = 'STRUK PEMBELIAN' }) => {
   if (!sale) return null;
 
   const store = settings || {};
@@ -12,7 +12,7 @@ const Receipt = ({ sale, settings, change = 0, title = 'STRUK PEMBELIAN', paperW
 
   return (
     <div id="receipt-print-area">
-      <div className={`receipt-paper ${paperWidth === '58' ? 'receipt-58' : ''}`}>
+      <div className="receipt-paper">
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontWeight: 'bold', fontSize: '12px' }}>{store.store_name || 'Minimarket'}</div>
           {store.address && <div>{store.address}</div>}
