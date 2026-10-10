@@ -369,13 +369,22 @@ router.post('/opnames', requirePermission('stock.manage'), async (req, res, next
       const opname = opnameResult.rows[0];
 
       if (inputItems && inputItems.length > 0) {
+        // Ambil stock_qty semua produk sekaligus (hindari N+1 per item).
+        const productIds = [...new Set(inputItems.map((it) => toInt(it.product_id, 0)).filter((id) => id > 0))];
+        const stockMap = new Map();
+        if (productIds.length > 0) {
+          const products = await client.query(
+            'SELECT id, stock_qty FROM products WHERE id = ANY($1::int[]) AND business = $2',
+            [productIds, req.business]
+          );
+          for (const p of products.rows) stockMap.set(p.id, p.stock_qty);
+        }
         for (const item of inputItems) {
           const productId = toInt(item.product_id, 0);
           if (productId <= 0) continue;
+          if (!stockMap.has(productId)) continue;
           const counted = Math.max(0, Math.round(Number(item.counted_qty) || 0));
-          const product = await client.query('SELECT stock_qty FROM products WHERE id = $1 AND business = $2', [productId, req.business]);
-          if (!product.rows[0]) continue;
-          const systemQty = product.rows[0].stock_qty;
+          const systemQty = stockMap.get(productId);
           await client.query(
             `INSERT INTO stock_opname_items (opname_id, product_id, system_qty, counted_qty, diff)
              VALUES ($1, $2, $3, $4, $5)
@@ -452,14 +461,22 @@ router.post('/opnames/:id/post', requirePermission('stock.manage'), async (req, 
         [opname.id]
       );
 
+      // Kunci semua produk opname sekaligus (hindari N+1 FOR UPDATE per item).
+      const productIds = [...new Set(itemsResult.rows.map((it) => it.product_id))];
+      const lockedMap = new Map();
+      if (productIds.length > 0) {
+        const products = await client.query(
+          'SELECT id, stock_qty, cost_price FROM products WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE',
+          [productIds]
+        );
+        for (const p of products.rows) lockedMap.set(p.id, p);
+      }
+
       let adjusted = 0;
       for (const item of itemsResult.rows) {
-        const locked = await client.query(
-          'SELECT stock_qty, cost_price FROM products WHERE id = $1 FOR UPDATE',
-          [item.product_id]
-        );
-        const currentQty = locked.rows[0]?.stock_qty ?? item.system_qty;
-        const costPrice = Number(locked.rows[0]?.cost_price || 0);
+        const locked = lockedMap.get(item.product_id);
+        const currentQty = locked?.stock_qty ?? item.system_qty;
+        const costPrice = Number(locked?.cost_price || 0);
         const diff = item.counted_qty - currentQty;
         if (diff === 0) continue;
 

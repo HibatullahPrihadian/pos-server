@@ -28,6 +28,25 @@ const buildItems = async (client, rawItems) => {
   }
 
   const items = [];
+
+  // Ambil conversion_factor semua satuan sekaligus (hindari N+1 per item).
+  const unitPairs = [];
+  for (const raw of rawItems) {
+    const unitId = toInt(raw.unit_id, 0) || null;
+    const productId = toInt(raw.product_id, 0);
+    if (unitId && productId > 0) unitPairs.push([unitId, productId]);
+  }
+  const unitMap = new Map();
+  if (unitPairs.length > 0) {
+    const unitIds = [...new Set(unitPairs.map(([u]) => u))];
+    const productIds = [...new Set(unitPairs.map(([, p]) => p))];
+    const units = await client.query(
+      'SELECT id, product_id, conversion_factor FROM product_units WHERE id = ANY($1::int[]) AND product_id = ANY($2::int[])',
+      [unitIds, productIds]
+    );
+    for (const u of units.rows) unitMap.set(`${u.id}:${u.product_id}`, u.conversion_factor);
+  }
+
   for (const raw of rawItems) {
     const productId = toInt(raw.product_id, 0);
     if (productId <= 0) throw new HttpError(400, 'product_id tidak valid');
@@ -42,12 +61,9 @@ const buildItems = async (client, rawItems) => {
 
     let conversionFactor = 1;
     if (unitId) {
-      const unit = await client.query(
-        'SELECT conversion_factor FROM product_units WHERE id = $1 AND product_id = $2',
-        [unitId, productId]
-      );
-      if (!unit.rows[0]) throw new HttpError(400, 'Satuan produk tidak ditemukan');
-      conversionFactor = unit.rows[0].conversion_factor;
+      const key = `${unitId}:${productId}`;
+      if (!unitMap.has(key)) throw new HttpError(400, 'Satuan produk tidak ditemukan');
+      conversionFactor = unitMap.get(key);
     }
 
     const baseQty = qty * conversionFactor;
@@ -254,6 +270,17 @@ router.post('/:id/receive', requirePermission('purchase.manage'), async (req, re
       let anyReceived = false;
       let allReceived = true;
 
+      // Kunci semua produk PO sekaligus (hindari N+1 FOR UPDATE per item).
+      const productIds = [...new Set(itemsResult.rows.map((it) => it.product_id))];
+      const productMap = new Map();
+      if (productIds.length > 0) {
+        const products = await client.query(
+          'SELECT id, stock_qty, cost_price FROM products WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE',
+          [productIds]
+        );
+        for (const p of products.rows) productMap.set(p.id, p);
+      }
+
       for (const item of itemsResult.rows) {
         const remaining = item.qty - item.received_qty;
         let receiveQty = requested.has(item.id) ? requested.get(item.id) : remaining;
@@ -270,15 +297,12 @@ router.post('/:id/receive', requirePermission('purchase.manage'), async (req, re
         const baseReceiveQty = Math.round(receiveQty * conversion);
         const baseUnitCost = Math.round(item.unit_cost / conversion);
 
-        const product = await client.query(
-          'SELECT stock_qty, cost_price FROM products WHERE id = $1 FOR UPDATE',
-          [item.product_id]
-        );
-        if (!product.rows[0]) throw new HttpError(404, 'Produk pada PO tidak ditemukan');
+        const product = productMap.get(item.product_id);
+        if (!product) throw new HttpError(404, 'Produk pada PO tidak ditemukan');
 
         const newCost = movingAverageCost(
-          product.rows[0].stock_qty,
-          product.rows[0].cost_price,
+          product.stock_qty,
+          product.cost_price,
           baseReceiveQty,
           baseUnitCost
         );

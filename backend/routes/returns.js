@@ -118,6 +118,25 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
       let total = 0;
       const prepared = [];
 
+      // Ambil semua sale_items + total refund sebelumnya sekaligus (hindari N+1).
+      const saleItemIds = [...new Set(items.map((r) => toInt(r?.sale_item_id, 0)).filter((id) => id > 0))];
+      const saleItemMap = new Map();
+      const priorRefundMap = new Map();
+      if (saleItemIds.length > 0) {
+        const found = await client.query(
+          'SELECT * FROM sale_items WHERE id = ANY($1::int[]) AND sale_id = $2',
+          [saleItemIds, saleId]
+        );
+        for (const it of found.rows) saleItemMap.set(it.id, it);
+
+        const priors = await client.query(
+          `SELECT sale_item_id, COALESCE(SUM(refund_amount), 0)::bigint AS prior
+           FROM return_items WHERE sale_item_id = ANY($1::int[]) GROUP BY sale_item_id`,
+          [saleItemIds]
+        );
+        for (const p of priors.rows) priorRefundMap.set(p.sale_item_id, Number(p.prior));
+      }
+
       for (const raw of items) {
         const saleItemId = toInt(raw?.sale_item_id, 0);
         if (saleItemId <= 0) throw new HttpError(400, 'sale_item_id tidak valid');
@@ -125,11 +144,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
         const qty = Math.round(Number(raw?.qty));
         if (!Number.isFinite(qty) || qty <= 0) throw new HttpError(400, 'qty retur harus bilangan bulat positif');
 
-        const itemResult = await client.query(
-          'SELECT * FROM sale_items WHERE id = $1 AND sale_id = $2',
-          [saleItemId, saleId]
-        );
-        const item = itemResult.rows[0];
+        const item = saleItemMap.get(saleItemId);
         if (!item) throw new HttpError(404, 'Item transaksi tidak ditemukan');
 
         const remaining = item.qty - item.returned_qty;
@@ -139,11 +154,7 @@ router.post('/', requirePermission('pos.use'), async (req, res, next) => {
 
         // Refund proporsional terhadap line_total setelah diskon item.
         // Saat unit terakhir diretur, sisa nilai dikembalikan penuh agar tidak ada selisih pembulatan.
-        const priorRefundResult = await client.query(
-          'SELECT COALESCE(SUM(refund_amount), 0)::bigint AS prior FROM return_items WHERE sale_item_id = $1',
-          [item.id]
-        );
-        const priorRefund = Number(priorRefundResult.rows[0].prior);
+        const priorRefund = priorRefundMap.get(saleItemId) || 0;
         const netPerUnit = Math.floor(item.line_total / item.qty);
 
         const isFinal = qty === remaining;

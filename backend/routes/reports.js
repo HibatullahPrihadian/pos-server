@@ -799,20 +799,20 @@ router.get('/stock-card/:productId', async (req, res, next) => {
 // akses ke lebih dari satu usaha). Header X-Business tidak dipakai di sini.
 // =========================================================
 const summarizeBusiness = async (business) => {
-  const today = await pool.query(
-    `SELECT COALESCE(SUM(grand_total), 0)::bigint AS grand_total, COUNT(*)::int AS txn_count
+  // Satu query agregat untuk today+month+open_shifts (hindari 3 round-trip).
+  // Rentang sargable (>= / <) agar index created_at terpakai, bukan created_at::date.
+  const summary = await pool.query(
+    `SELECT
+       COALESCE(SUM(grand_total) FILTER (WHERE created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day'), 0)::bigint AS today_total,
+       COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day')::int AS today_count,
+       COALESCE(SUM(grand_total) FILTER (WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0)::bigint AS month_total,
+       COUNT(*) FILTER (WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE))::int AS month_count
      FROM sales
-     WHERE business = $1 AND status = 'completed' AND created_at::date = CURRENT_DATE`,
-    [business]
-  );
-  const month = await pool.query(
-    `SELECT COALESCE(SUM(grand_total), 0)::bigint AS grand_total, COUNT(*)::int AS txn_count
-     FROM sales
-     WHERE business = $1 AND status = 'completed' AND created_at >= DATE_TRUNC('month', CURRENT_DATE)`,
+     WHERE business = $1 AND status = 'completed'`,
     [business]
   );
   const openShifts = await pool.query(
-    `SELECT COUNT(*)::int AS n FROM shifts WHERE business = $1 AND closed_at IS NULL`,
+    'SELECT COUNT(*)::int AS n FROM shifts WHERE business = $1 AND closed_at IS NULL',
     [business]
   );
   const trend = await pool.query(
@@ -823,16 +823,17 @@ const summarizeBusiness = async (business) => {
     [business]
   );
   const trendRange = currentMonthTrendRange();
+  const row = summary.rows[0];
 
   return {
     business,
     today: {
-      grand_total: Number(today.rows[0].grand_total),
-      txn_count: today.rows[0].txn_count,
+      grand_total: Number(row.today_total),
+      txn_count: row.today_count,
     },
     month: {
-      grand_total: Number(month.rows[0].grand_total),
-      txn_count: month.rows[0].txn_count,
+      grand_total: Number(row.month_total),
+      txn_count: row.month_count,
     },
     open_shifts: openShifts.rows[0].n,
     trend: zeroFillDailySeries(
@@ -858,7 +859,7 @@ router.get('/overview', requirePermission('report.view'), async (req, res, next)
       `SELECT COUNT(*)::int AS order_count, COALESCE(SUM(grand_total), 0)::bigint AS grand_total
        FROM print_orders
        WHERE business = 'fotokopi' AND payment_status = 'paid' AND status <> 'cancelled'
-         AND created_at::date = CURRENT_DATE`,
+         AND created_at >= CURRENT_DATE AND created_at < (CURRENT_DATE + INTERVAL '1 day')`,
       []
     );
     const printQueue = await pool.query(
@@ -916,7 +917,7 @@ router.get('/dashboard', async (req, res, next) => {
               COALESCE(SUM(grand_total), 0)::bigint AS grand_total,
               COALESCE(SUM(tax_total), 0)::bigint AS tax_total
        FROM sales
-       WHERE business = $1 AND status = 'completed' AND created_at::date = CURRENT_DATE`,
+       WHERE business = $1 AND status = 'completed' AND created_at >= CURRENT_DATE AND created_at < (CURRENT_DATE + INTERVAL '1 day')`,
       [business]
     );
 
@@ -931,7 +932,7 @@ router.get('/dashboard', async (req, res, next) => {
     const profitToday = await pool.query(
       `SELECT COALESCE(SUM(si.line_total - (si.cost_price * si.qty)), 0)::bigint AS gross_profit
        FROM sale_items si JOIN sales s ON s.id = si.sale_id
-       WHERE s.business = $1 AND s.status = 'completed' AND s.created_at::date = CURRENT_DATE`,
+       WHERE s.business = $1 AND s.status = 'completed' AND s.created_at >= CURRENT_DATE AND s.created_at < (CURRENT_DATE + INTERVAL '1 day')`,
       [business]
     );
 
