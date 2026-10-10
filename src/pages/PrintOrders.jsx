@@ -168,7 +168,7 @@ const PrintOrders = () => {
       />
 
       <Card className="mb-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 desk:grid-cols-5 gap-3">
           <Input
             as="select"
             label="Status"
@@ -309,7 +309,7 @@ const PrintOrders = () => {
         )}
       >
         {detail && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 desk:grid-cols-2 gap-6">
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-400">Antrian</span>

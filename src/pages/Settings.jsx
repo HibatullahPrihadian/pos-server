@@ -90,7 +90,7 @@ const Settings = () => {
         actions={<Button onClick={save} disabled={saving}><Save size={16} /> {saving ? 'Menyimpan...' : 'Simpan'}</Button>}
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 desk:grid-cols-2 gap-6">
         <Card title="Identitas Toko">
           <div className="space-y-4">
             <Input label="Nama Toko *" value={form.store_name} onChange={(e) => setForm({ ...form, store_name: e.target.value })} />

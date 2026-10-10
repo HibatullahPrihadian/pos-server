@@ -58,7 +58,7 @@ const OwnerDashboard = () => {
         subtitle="Ringkasan gabungan minimarket & fotokopi"
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 desk:grid-cols-4 gap-4 mb-6">
         <Card>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Penjualan Hari Ini</p>
           <p className="text-2xl font-bold text-white mt-2">{formatCurrency(data.totals.today_grand_total)}</p>
@@ -81,10 +81,10 @@ const OwnerDashboard = () => {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+      <div className="grid grid-cols-1 desk:grid-cols-3 gap-6 mb-6">
         <Card
           title="Tren Gabungan Bulan Ini"
-          className="lg:col-span-2 flex flex-col"
+          className="desk:col-span-2 flex flex-col"
           bodyClassName="flex-1 min-h-48 flex flex-col"
         >
           <TrendLineChart data={data.trend || []} />
@@ -102,7 +102,7 @@ const OwnerDashboard = () => {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 desk:grid-cols-2 gap-5">
         {data.businesses.map((b) => {
           const Icon = ICONS[b.business] || Store;
           const meta = BUSINESS_META[b.business] || { label: b.business, description: '' };

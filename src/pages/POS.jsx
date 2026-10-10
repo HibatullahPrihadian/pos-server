@@ -931,7 +931,7 @@ const POS = () => {
   }
 
   return (
-    <div className="flex flex-col gap-3 h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
+    <div className="flex flex-col gap-3 h-[calc(100vh-120px)] desk:h-[calc(100vh-140px)]">
       {/* Bar atas: scan + kamera + pencarian (dropdown hasil) */}
       <Card padded={false} className="shrink-0">
         <div className="p-4">

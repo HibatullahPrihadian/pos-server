@@ -109,7 +109,7 @@ const Shifts = () => {
     <div>
       <PageHeader title="Shift" subtitle="Buka/tutup shift kasir dan rekap kas" />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+      <div className="grid grid-cols-1 desk:grid-cols-2 gap-5 mb-6">
         {currentLoading ? (
           <Card><p className="text-slate-400 text-sm">Memuat shift...</p></Card>
         ) : current ? (
@@ -161,7 +161,7 @@ const Shifts = () => {
           </Card>
         )}
 
-        <Card title="Ringkasan" className="lg:row-span-1">
+        <Card title="Ringkasan" className="desk:row-span-1">
           <div className="flex items-center gap-3 text-slate-400 text-sm">
             <Clock size={18} />
             <span>

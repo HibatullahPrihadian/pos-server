@@ -345,7 +345,7 @@ const Reports = () => {
       if (!data.summary) return <p className="text-sm text-slate-400 py-8 text-center">Data tidak tersedia</p>;
       return (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
+          <div className="grid grid-cols-2 desk:grid-cols-6 gap-3 mb-4">
             {[
               { label: 'Penjualan', value: formatCurrency(data.summary?.revenue ?? 0) },
               { label: 'HPP', value: formatCurrency(data.summary?.cogs ?? 0) },
@@ -361,7 +361,7 @@ const Reports = () => {
             ))}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          <div className="grid grid-cols-1 desk:grid-cols-2 gap-4 mb-4">
             <div>
               <h4 className="text-sm font-semibold text-white mb-2">Beban per Kategori</h4>
               <Table
@@ -434,7 +434,7 @@ const Reports = () => {
       if (!data.summary) return <p className="text-sm text-slate-400 py-8 text-center">Data tidak tersedia</p>;
       return (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+          <div className="grid grid-cols-1 desk:grid-cols-3 gap-3 mb-4">
             {[
               { label: 'Total Modal', value: formatCurrency(data.summary?.total_amount ?? 0), highlight: true },
               { label: 'Jumlah PO', value: data.summary?.po_count ?? 0 },

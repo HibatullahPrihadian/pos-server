@@ -6,6 +6,12 @@ export default {
   ],
   theme: {
     extend: {
+      // Mode desktop hanya bila layar lebar DAN pointer presisi (mouse/trackpad).
+      // Perangkat sentuh (HP & tablet, termasuk tablet landscape besar) tetap
+      // memakai layout HP walau lebarnya ≥1280, karena pointer-nya coarse.
+      screens: {
+        desk: { raw: '(min-width: 1280px) and (pointer: fine)' },
+      },
       colors: {
         slate: {
           950: '#121212',

@@ -58,9 +58,9 @@ const KPISection = ({ title, cols = 4, children }) => (
     <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{title}</h2>
     <div
       className={`grid grid-cols-1 gap-4 ${
-        cols === 3 ? 'md:grid-cols-2 xl:grid-cols-3'
-          : cols === 2 ? 'md:grid-cols-2'
-            : 'md:grid-cols-2 xl:grid-cols-4'
+        cols === 3 ? 'desk:grid-cols-3'
+          : cols === 2 ? 'desk:grid-cols-2'
+            : 'desk:grid-cols-4'
       }`}
     >
       {children}
@@ -107,7 +107,7 @@ const PrintDashboard = () => {
     <div>
       <PageHeader title="Dashboard Fotokopi" subtitle="Ringkasan pesanan & pendapatan jasa" />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-1 desk:grid-cols-4 gap-4 mb-6">
         <KPI
           icon={Wallet}
           label="Pendapatan Hari Ini"
@@ -142,10 +142,10 @@ const PrintDashboard = () => {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 desk:grid-cols-3 gap-5">
         <Card
           title="Pendapatan Bulan Ini"
-          className="lg:col-span-2 flex flex-col"
+          className="desk:col-span-2 flex flex-col"
           bodyClassName="flex-1 min-h-48 flex flex-col"
         >
           <TrendLineChart data={printTrend} emptyLabel="Belum ada penjualan jasa" />
@@ -328,7 +328,7 @@ const MinimarketDashboard = () => {
         <TrendLineChart data={data.trend} />
       </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 desk:grid-cols-3 gap-5">
         <Card title="Produk Terlaris (30 hari)">
           {data.top_products.length === 0 ? (
             <p className="text-sm text-slate-400">Belum ada penjualan</p>

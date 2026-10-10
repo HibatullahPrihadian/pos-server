@@ -11,6 +11,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useBusiness, BUSINESS_META } from '../../context/BusinessContext';
 import { api } from '../../api/client';
 import { useToastContext } from '../../context/ToastContext';
+import useDeskMode from '../../hooks/useDeskMode';
 
 // Menu dikelompokkan; `permission` menyembunyikan item dari user tanpa izin.
 const MENU_MINIMARKET = [
@@ -102,6 +103,9 @@ const MENU_PRINT = [
 
 const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const isDesk = useDeskMode();
+  // Di drawer mobile (non-desk) sidebar selalu penuh, apa pun state collapse.
+  const collapsed = isCollapsed && isDesk;
   const { user, can, logout } = useAuth();
   const { business, canSwitch, setBusiness, clearBusiness } = useBusiness();
   const toast = useToastContext();
@@ -164,16 +168,16 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
       {/* Backdrop mobile: hanya saat drawer terbuka di layar < md. */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm desk:hidden"
           onClick={onMobileClose}
           aria-hidden="true"
         />
       )}
       <div
-        className={`h-screen bg-slate-900/65 backdrop-blur-glass text-slate-300 transition-all duration-300 flex flex-col border-r border-white/10 shrink-0 fixed z-50 md:static md:z-auto md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} ${isCollapsed ? 'w-20' : 'w-64'}`}
+        className={`h-screen bg-slate-900/65 backdrop-blur-glass text-slate-300 transition-all duration-300 flex flex-col border-r border-white/10 shrink-0 fixed z-50 desk:static desk:z-auto desk:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full desk:translate-x-0'} ${collapsed ? 'w-64 desk:w-20' : 'w-64'}`}
       >
         <div className="p-4 flex items-center justify-between">
-          {!isCollapsed && (
+          {!collapsed && (
             <h1 className="text-lg font-bold text-white flex items-center gap-2">
               <Store size={20} className="text-ios-blue" />
               POS <span className="text-ios-blue">Mini</span>
@@ -181,14 +185,14 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
           )}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className={`hidden md:block p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white transition-all ${isCollapsed ? 'mx-auto' : ''}`}
+            className={`hidden desk:block p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white transition-all ${collapsed ? 'mx-auto' : ''}`}
             aria-label="Toggle sidebar"
           >
-            {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+            {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
           <button
             onClick={onMobileClose}
-            className="md:hidden p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white"
+            className="desk:hidden p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white"
             aria-label="Tutup menu"
           >
             <X size={18} />
@@ -202,7 +206,7 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
 
           return (
             <div key={group.section} className="mb-4">
-              {!isCollapsed && (
+              {!collapsed && (
                 <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                   {group.section}
                 </p>
@@ -217,12 +221,12 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
                       end={item.path === '/'}
                       onClick={onMobileClose}
                       className={({ isActive }) =>
-                        `flex items-center p-2.5 rounded-xl transition-colors text-sm ${isActive ? 'bg-ios-blue text-white shadow-glow-blue' : 'hover:bg-white/10 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`
+                        `flex items-center p-2.5 rounded-xl transition-colors text-sm ${isActive ? 'bg-ios-blue text-white shadow-glow-blue' : 'hover:bg-white/10 hover:text-white'} ${collapsed ? 'justify-center' : ''}`
                       }
-                      title={isCollapsed ? item.name : undefined}
+                      title={collapsed ? item.name : undefined}
                     >
                       <Icon size={18} />
-                      {!isCollapsed && <span className="ml-3 font-medium">{item.name}</span>}
+                      {!collapsed && <span className="ml-3 font-medium">{item.name}</span>}
                     </NavLink>
                   );
                 })}
@@ -233,7 +237,7 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
       </nav>
 
       <div className="p-3 border-t border-white/10">
-        {!isCollapsed ? (
+        {!collapsed ? (
           <div className="mb-2 px-2">
             <p className="text-sm font-medium text-white truncate">{user?.full_name}</p>
             <p className="text-xs text-slate-400 flex items-center gap-1">
@@ -252,20 +256,20 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
             {business !== 'all' && (
               <button
                 onClick={() => setBusiness('all')}
-                className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-slate-300 hover:bg-white/10 hover:text-white transition-colors ${isCollapsed ? 'justify-center' : ''}`}
+                className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-slate-300 hover:bg-white/10 hover:text-white transition-colors ${collapsed ? 'justify-center' : ''}`}
                 title="Semua Usaha"
               >
                 <LayoutGrid size={18} />
-                {!isCollapsed && <span>Semua Usaha</span>}
+                {!collapsed && <span>Semua Usaha</span>}
               </button>
             )}
             <button
               onClick={() => { clearBusiness(); navigate('/'); }}
-              className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-purple hover:bg-ios-purple/10 transition-colors ${isCollapsed ? 'justify-center' : ''}`}
+              className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-purple hover:bg-ios-purple/10 transition-colors ${collapsed ? 'justify-center' : ''}`}
               title="Ganti Usaha"
             >
               <ArrowLeftRight size={18} />
-              {!isCollapsed && <span>Ganti Usaha</span>}
+              {!collapsed && <span>Ganti Usaha</span>}
             </button>
           </>
         )}
@@ -275,24 +279,24 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
           <button
             onClick={handleCheckOut}
             disabled={attendanceBusy}
-            className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-orange hover:bg-ios-orange/10 transition-colors disabled:opacity-50 ${isCollapsed ? 'justify-center' : ''}`}
+            className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-orange hover:bg-ios-orange/10 transition-colors disabled:opacity-50 ${collapsed ? 'justify-center' : ''}`}
             title="Absen Pulang"
           >
             <LogOutIcon size={18} />
-            {!isCollapsed && <span>Absen Pulang</span>}
+            {!collapsed && <span>Absen Pulang</span>}
           </button>
         ) : !attendance ? (
           <button
             onClick={handleCheckIn}
             disabled={attendanceBusy}
-            className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-green hover:bg-ios-green/10 transition-colors disabled:opacity-50 ${isCollapsed ? 'justify-center' : ''}`}
+            className={`flex items-center gap-2 w-full p-2.5 mb-1 rounded-xl text-sm text-ios-green hover:bg-ios-green/10 transition-colors disabled:opacity-50 ${collapsed ? 'justify-center' : ''}`}
             title="Absen Masuk"
           >
             <LogIn size={18} />
-            {!isCollapsed && <span>Absen Masuk</span>}
+            {!collapsed && <span>Absen Masuk</span>}
           </button>
         ) : (
-          !isCollapsed && (
+          !collapsed && (
             <div className="px-2 mb-1 text-xs text-slate-400 flex items-center gap-1">
               <CalendarCheck size={12} /> Absensi hari ini selesai
             </div>
@@ -301,10 +305,10 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
 
         <button
           onClick={handleLogout}
-          className={`flex items-center gap-2 w-full p-2.5 rounded-xl text-sm text-ios-red hover:bg-ios-red/10 transition-colors ${isCollapsed ? 'justify-center' : ''}`}
+          className={`flex items-center gap-2 w-full p-2.5 rounded-xl text-sm text-ios-red hover:bg-ios-red/10 transition-colors ${collapsed ? 'justify-center' : ''}`}
         >
           <LogOut size={18} />
-          {!isCollapsed && <span>Keluar</span>}
+          {!collapsed && <span>Keluar</span>}
         </button>
       </div>
       </div>

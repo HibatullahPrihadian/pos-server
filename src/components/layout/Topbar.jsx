@@ -39,11 +39,11 @@ const Topbar = ({ onMenuClick }) => {
   }).format(now);
 
   return (
-    <div className="flex items-center justify-between px-3 md:px-6 py-3 border-b border-white/10 bg-slate-900/40 backdrop-blur-glass">
-      <div className="flex items-center gap-2 md:gap-3">
+    <div className="flex items-center justify-between px-3 desk:px-6 py-3 border-b border-white/10 bg-slate-900/40 backdrop-blur-glass">
+      <div className="flex items-center gap-2 desk:gap-3">
         <button
           onClick={onMenuClick}
-          className="md:hidden p-2 rounded-lg bg-white/10 hover:bg-white/15 text-white"
+          className="desk:hidden p-2 rounded-lg bg-white/10 hover:bg-white/15 text-white"
           aria-label="Buka menu"
         >
           <Menu size={18} />

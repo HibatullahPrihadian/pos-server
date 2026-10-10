@@ -1,13 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import BusinessPicker from './BusinessPicker';
 import Spinner from '../ui/Spinner';
 import { useBusiness } from '../../context/BusinessContext';
+import useDeskMode from '../../hooks/useDeskMode';
 
 const MainLayout = ({ children }) => {
   const { business, needsChoice } = useBusiness();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const isDesk = useDeskMode();
+
+  // Pindah ke layout desktop (mis. rotate tablet / resize) menutup drawer agar
+  // tidak tersisa terbuka saat kembali ke mode sempit.
+  useEffect(() => {
+    if (isDesk) setMobileOpen(false);
+  }, [isDesk]);
 
   // Tahan mount halaman sampai mode usaha final: header X-Business dibaca dari
   // penyimpanan, sehingga request sebelum mode siap bisa salah usaha (403).
@@ -27,7 +35,7 @@ const MainLayout = ({ children }) => {
       <div className="flex-1 flex flex-col overflow-hidden">
         <Topbar onMenuClick={() => setMobileOpen(true)} />
         <main className="flex-1 overflow-y-auto">
-          <div className="max-w-[1500px] mx-auto p-4 md:p-6">{children}</div>
+          <div className="max-w-[1500px] mx-auto p-4 desk:p-6">{children}</div>
         </main>
       </div>
     </div>

@@ -166,7 +166,7 @@ const PrintReports = () => {
         </div>
       </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 desk:grid-cols-3 gap-4 mb-6">
         <Card>
           <div className="flex items-start justify-between">
             <div>
@@ -205,8 +205,8 @@ const PrintReports = () => {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card title="Penjualan Harian" className="lg:col-span-2" padded={false}>
+      <div className="grid grid-cols-1 desk:grid-cols-3 gap-6">
+        <Card title="Penjualan Harian" className="desk:col-span-2" padded={false}>
           <div className="p-4">
             <Table
               columns={[
