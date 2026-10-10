@@ -141,7 +141,7 @@ const Transactions = () => {
       <Card padded={false}>
         <div className="p-4 flex flex-wrap gap-3 border-b border-white/10">
           <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               className="bg-slate-950/60 border border-white/10 rounded-ios-sm pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
               placeholder="Cari no. invoice..."
@@ -287,7 +287,7 @@ const Transactions = () => {
                     <p className="text-slate-400 mb-1">Retur:</p>
                     {detail.returns.map((ret) => (
                       <div key={ret.id} className="flex justify-between text-xs">
-                        <span className="text-slate-500 font-mono">{ret.code}</span>
+                        <span className="text-slate-400 font-mono">{ret.code}</span>
                         <span className="text-ios-orange">-{formatCurrency(ret.total)}</span>
                       </div>
                     ))}

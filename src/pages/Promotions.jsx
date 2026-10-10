@@ -288,7 +288,7 @@ const Promotions = () => {
             <option value="0">Nonaktif</option>
           </Input>
         </div>
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-slate-400">
           Harga batch: `discount_value` adalah harga total untuk `min_qty` unit. Rentang jam boleh melewati tengah malam (mis. 22:00 - 02:00).
         </p>
       </Modal>

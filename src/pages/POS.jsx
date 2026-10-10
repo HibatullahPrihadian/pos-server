@@ -931,7 +931,7 @@ const POS = () => {
   }
 
   return (
-    <div className="flex flex-col gap-3 h-[calc(100vh-140px)]">
+    <div className="flex flex-col gap-3 h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
       {/* Bar atas: scan + kamera + pencarian (dropdown hasil) */}
       <Card padded={false} className="shrink-0">
         <div className="p-4">
@@ -954,7 +954,7 @@ const POS = () => {
               size="lg"
             />
             <div className="relative flex-1">
-              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 ref={searchRef}
                 className="w-full bg-slate-950/60 border border-white/10 rounded-ios-sm pl-10 pr-3 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
@@ -1032,13 +1032,13 @@ const POS = () => {
             </div>
           )}
           {cart.items.length > 0 && (
-            <p className="mt-2 text-[10px] text-slate-500">Klik baris lalu tekan + / − untuk ubah jumlah</p>
+            <p className="mt-2 text-[10px] text-slate-400">Klik baris lalu tekan + / − untuk ubah jumlah</p>
           )}
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5">
           {cart.items.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 text-sm">
+            <div className="text-center py-12 text-slate-400 text-sm">
               Scan barcode atau cari produk untuk memulai
             </div>
           ) : (
@@ -1049,17 +1049,26 @@ const POS = () => {
               return (
                 <div
                   key={key}
+                  role="button"
+                  tabIndex={0}
                   onClick={(e) => {
                     if (e.target instanceof Element && e.target.closest('button,input')) return;
                     selectCartItem(key);
                   }}
+                  onKeyDown={(e) => {
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      selectCartItem(key);
+                    }
+                  }}
                   aria-pressed={selected}
-                  className={`${selected ? 'bg-ios-blue/10 ring-2 ring-ios-blue/60' : 'bg-white/5'} rounded-ios-sm px-3 py-2 cursor-pointer`}
+                  className={`${selected ? 'bg-ios-blue/10 ring-2 ring-ios-blue/60' : 'bg-white/5'} rounded-ios-sm px-3 py-2 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-ios-blue/60`}
                 >
                   <div className="flex items-center gap-2">
                     <div className="flex-1 min-w-0">
                       <div className="text-sm text-white truncate">{item.name}</div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-500 truncate">
+                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 truncate">
                         <span className="shrink-0">{formatCurrency(item.price)} / {item.bundle_id ? 'paket' : item.unit_name}</span>
                         {item.bundle_id && <span className="shrink-0 text-ios-purple font-medium">PAKET</span>}
                         {item.promo_name && <span className="truncate text-ios-red font-medium">PROMO: {item.promo_name}</span>}
@@ -1113,7 +1122,7 @@ const POS = () => {
                   </div>
                   {editorOpen && (
                     <div className="mt-1.5 flex items-center gap-2">
-                      <span className="text-[10px] text-slate-500">Diskon item</span>
+                      <span className="text-[10px] text-slate-400">Diskon item</span>
                       <input
                         type="number"
                         className="w-24 bg-slate-950/60 border border-white/10 rounded px-2 py-1 text-xs text-white text-right"
@@ -1213,7 +1222,7 @@ const POS = () => {
             onClick={() => chooseUnitOption(unitOptions[0])}
             className={`w-full flex justify-between items-center px-4 py-3 rounded-ios-sm ${unitActiveIndex === 0 ? 'bg-ios-blue/25 border border-ios-blue/50' : 'bg-white/5 hover:bg-white/10'}`}
           >
-            <span className="text-white">1 {unitPicker?.product?.base_unit} <span className="text-xs text-slate-500">(1)</span></span>
+            <span className="text-white">1 {unitPicker?.product?.base_unit} <span className="text-xs text-slate-400">(1)</span></span>
             <span className="text-ios-green">
               {formatCurrency(cart.member && unitPicker?.product?.member_price != null ? unitPicker.product.member_price : unitPicker?.product?.sell_price)}
             </span>
@@ -1225,14 +1234,14 @@ const POS = () => {
               className={`w-full flex justify-between items-center px-4 py-3 rounded-ios-sm ${unitActiveIndex === idx + 1 ? 'bg-ios-blue/25 border border-ios-blue/50' : 'bg-white/5 hover:bg-white/10'}`}
             >
               <span className="text-white">
-                {idx + 2} {unit.unit_name} (x{unit.conversion_factor}) <span className="text-xs text-slate-500">({idx + 2})</span>
+                {idx + 2} {unit.unit_name} (x{unit.conversion_factor}) <span className="text-xs text-slate-400">({idx + 2})</span>
               </span>
               <span className="text-ios-green">
                 {formatCurrency(cart.member && unit.member_price != null ? unit.member_price : unit.sell_price)}
               </span>
             </button>
           ))}
-          <p className="text-[10px] text-slate-500 pt-1">↑/↓ lalu Enter, atau tekan angka sesuai urutan</p>
+          <p className="text-[10px] text-slate-400 pt-1">↑/↓ lalu Enter, atau tekan angka sesuai urutan</p>
         </div>
       </Modal>
 
@@ -1255,7 +1264,7 @@ const POS = () => {
             >
               <div className="text-left">
                 <div className="text-sm text-white">{member.name}</div>
-                <div className="text-xs text-slate-500 font-mono">{member.code}</div>
+                <div className="text-xs text-slate-400 font-mono">{member.code}</div>
               </div>
               <span className="text-xs text-ios-yellow flex items-center gap-1">
                 <Coins size={12} /> {member.points}
@@ -1263,10 +1272,10 @@ const POS = () => {
             </button>
           ))}
           {memberSearch && memberResults.length === 0 && (
-            <p className="text-sm text-slate-500 text-center py-4">Member tidak ditemukan</p>
+            <p className="text-sm text-slate-400 text-center py-4">Member tidak ditemukan</p>
           )}
           {memberResults.length > 0 && (
-            <p className="text-[10px] text-slate-500">↑/↓ lalu Enter untuk memilih</p>
+            <p className="text-[10px] text-slate-400">↑/↓ lalu Enter untuk memilih</p>
           )}
         </div>
 
@@ -1373,7 +1382,7 @@ const POS = () => {
                   onChange={(e) => setDueDate(e.target.value)}
                 />
               </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-400">
                 Pembayaran di bawah ini opsional (uang muka). Sisa tagihan tercatat sebagai piutang dan tidak menambah kas shift.
               </p>
             </div>
@@ -1392,7 +1401,7 @@ const POS = () => {
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-slate-500 -mt-2">Tekan 1–4 untuk pilih metode, Enter untuk konfirmasi bayar</p>
+          <p className="text-[10px] text-slate-400 -mt-2">Tekan 1–4 untuk pilih metode, Enter untuk konfirmasi bayar</p>
 
           <div className="space-y-2">
             {payments.map((payment, index) => (
@@ -1547,7 +1556,7 @@ const POS = () => {
             onChange={(e) => setHoldNote(e.target.value)}
             placeholder="Catatan singkat..."
           />
-          <div className="text-xs text-slate-500">
+          <div className="text-xs text-slate-400">
             {cart.items.length} item · total ± {formatCurrency(estimatedTotal)}
           </div>
         </div>
@@ -1561,7 +1570,7 @@ const POS = () => {
         size="md"
         footer={
           <div className="flex justify-between items-center">
-            <span className="text-xs text-slate-500">↑/↓ lalu Enter untuk mengambil hold</span>
+            <span className="text-xs text-slate-400">↑/↓ lalu Enter untuk mengambil hold</span>
             <Button variant="neutral" onClick={() => setHoldsOpen(false)}>Tutup</Button>
           </div>
         }
@@ -1570,7 +1579,7 @@ const POS = () => {
           {holdsLoading && <p className="text-sm text-slate-400 text-center py-6">Memuat hold...</p>}
           {holdsError && <p className="text-sm text-ios-red text-center py-6">{holdsError}</p>}
           {!holdsLoading && !holdsError && holdsList.length === 0 && (
-            <p className="text-sm text-slate-500 text-center py-6">Belum ada hold aktif</p>
+            <p className="text-sm text-slate-400 text-center py-6">Belum ada hold aktif</p>
           )}
           {holdsList.map((hold) => (
             <div
@@ -1583,7 +1592,7 @@ const POS = () => {
                   {hold.hold_name || 'Tanpa nama'} · {hold.item_count} item · {formatCurrency(hold.estimated_total)}
                   {hold.member_name ? ` · ${hold.member_name}` : ''}
                 </div>
-                <div className="text-[10px] text-slate-500">
+                <div className="text-[10px] text-slate-400">
                   {hold.cashier_name} · {new Date(hold.created_at).toLocaleString('id-ID')}
                 </div>
               </div>
@@ -1665,7 +1674,7 @@ const SearchResults = ({ anchorRect, containerRef, loading, products, bundles, q
         <div className="px-4 py-6 text-center text-sm text-slate-400">Mencari...</div>
       )}
       {!loading && !hasResults && (
-        <div className="px-4 py-6 text-center text-sm text-slate-500">Produk tidak ditemukan</div>
+        <div className="px-4 py-6 text-center text-sm text-slate-400">Produk tidak ditemukan</div>
       )}
 
       {shownBundles.length > 0 && (
@@ -1682,7 +1691,7 @@ const SearchResults = ({ anchorRect, containerRef, loading, products, bundles, q
                   {bundle.name}
                   <Badge tone="purple">PAKET</Badge>
                 </div>
-                <div className="text-xs text-slate-500 font-mono">{bundle.sku}</div>
+                <div className="text-xs text-slate-400 font-mono">{bundle.sku}</div>
               </div>
               <span className="text-ios-green font-semibold text-sm">{formatCurrency(bundle.price)}</span>
             </button>
@@ -1710,9 +1719,9 @@ const SearchResults = ({ anchorRect, containerRef, loading, products, bundles, q
                     {expiryFlag === 'expired' && <Badge tone="red">Kadaluarsa</Badge>}
                     {expiryFlag === 'soon' && <Badge tone="orange">Segera</Badge>}
                   </div>
-                  <div className="text-xs text-slate-500 font-mono flex items-center gap-2">
+                  <div className="text-xs text-slate-400 font-mono flex items-center gap-2">
                     {product.sku}
-                    <span className={out ? 'text-ios-red' : 'text-slate-500'}>
+                    <span className={out ? 'text-ios-red' : 'text-slate-400'}>
                       {out ? 'stok habis' : `stok ${product.stock_qty}`}
                     </span>
                   </div>

@@ -320,7 +320,7 @@ const Products = () => {
       <Card padded={false}>
         <div className="p-4 flex flex-wrap gap-3 border-b border-white/10">
           <div className="relative flex-1 min-w-[200px]">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               className="w-full bg-slate-950/60 border border-white/10 rounded-ios-sm pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
               placeholder="Cari nama / SKU / barcode..."
@@ -357,20 +357,20 @@ const Products = () => {
                         {product.name}
                         {product.is_consignment && <Badge tone="purple">Titipan</Badge>}
                       </div>
-                      {product.barcode && <div className="text-xs text-slate-500">{product.barcode}</div>}
+                      {product.barcode && <div className="text-xs text-slate-400">{product.barcode}</div>}
                     </div>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-slate-400">{product.category_name || '-'}</td>
                 <td className="px-4 py-3 text-right text-white">
                   Rp {Number(product.sell_price).toLocaleString('id-ID')}
-                  <div className="text-xs text-slate-500">/{product.base_unit}</div>
+                  <div className="text-xs text-slate-400">/{product.base_unit}</div>
                 </td>
                 <td className="px-4 py-3 text-right">
                   <span className={product.stock_qty <= product.min_stock ? 'text-ios-orange font-medium' : 'text-white'}>
                     {product.stock_qty}
                   </span>
-                  <div className="text-xs text-slate-500">min {product.min_stock}</div>
+                  <div className="text-xs text-slate-400">min {product.min_stock}</div>
                 </td>
                 <td className="px-4 py-3 text-center">
                   {product.is_active ? <Badge tone="green">Aktif</Badge> : <Badge tone="red">Nonaktif</Badge>}
@@ -446,7 +446,7 @@ const Products = () => {
             </>
           )}
         </div>
-        <p className="mt-3 text-xs text-slate-500">Semua harga dalam rupiah dan sudah termasuk PPN. Harga Beli (HPP) produk konsinyasi dipakai sebagai harga setor ke penitip.</p>
+        <p className="mt-3 text-xs text-slate-400">Semua harga dalam rupiah dan sudah termasuk PPN. Harga Beli (HPP) produk konsinyasi dipakai sebagai harga setor ke penitip.</p>
       </Modal>
 
       <BarcodeScannerModal
@@ -457,13 +457,13 @@ const Products = () => {
 
       <Modal isOpen={Boolean(unitsProduct)} onClose={() => setUnitsProduct(null)} title={`Satuan - ${unitsProduct?.name || ''}`}>
         <div className="space-y-3 mb-4">
-          {units.length === 0 && <p className="text-sm text-slate-500">Belum ada satuan tambahan.</p>}
+          {units.length === 0 && <p className="text-sm text-slate-400">Belum ada satuan tambahan.</p>}
           {units.map((unit) => (
             <div key={unit.id} className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-ios-sm">
               <div>
                 <span className="text-white font-medium">1 {unit.unit_name}</span>
                 <span className="text-slate-400"> = {unit.conversion_factor} {unitsProduct?.base_unit}</span>
-                <div className="text-xs text-slate-500">Rp {Number(unit.sell_price).toLocaleString('id-ID')}{unit.barcode ? ` • ${unit.barcode}` : ''}</div>
+                <div className="text-xs text-slate-400">Rp {Number(unit.sell_price).toLocaleString('id-ID')}{unit.barcode ? ` • ${unit.barcode}` : ''}</div>
               </div>
               <Button variant="ghost" size="sm" onClick={() => deleteUnit(unit.id)}><Trash2 size={14} className="text-ios-red" /></Button>
             </div>
@@ -483,7 +483,7 @@ const Products = () => {
 
       <Modal isOpen={Boolean(barcodesProduct)} onClose={() => setBarcodesProduct(null)} title={`Barcode Tambahan - ${barcodesProduct?.name || ''}`}>
         <div className="space-y-2 mb-4">
-          {barcodes.length === 0 && <p className="text-sm text-slate-500">Belum ada barcode tambahan.</p>}
+          {barcodes.length === 0 && <p className="text-sm text-slate-400">Belum ada barcode tambahan.</p>}
           {barcodes.map((b) => (
             <div key={b.id} className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-ios-sm">
               <div>
@@ -503,14 +503,14 @@ const Products = () => {
               {barcodesUnits.map((u) => <option key={u.id} value={u.id}>{u.unit_name}</option>)}
             </Input>
           </div>
-          <p className="text-xs text-slate-500 mt-2">Pilih satuan hanya bila barcode mewakili unit seperti dus/karton. Barcode harus unik di semua sumber.</p>
+          <p className="text-xs text-slate-400 mt-2">Pilih satuan hanya bila barcode mewakili unit seperti dus/karton. Barcode harus unik di semua sumber.</p>
           <Button className="mt-3" onClick={addBarcode} disabled={!barcodeForm.barcode}><Plus size={16} /> Tambah</Button>
         </div>
       </Modal>
 
       <Modal isOpen={Boolean(tiersProduct)} onClose={() => setTiersProduct(null)} title={`Harga Partai Bertingkat - ${tiersProduct?.name || ''}`} size="lg">
         <div className="space-y-2 mb-4">
-          {tiers.length === 0 && <p className="text-sm text-slate-500">Belum ada tier harga.</p>}
+          {tiers.length === 0 && <p className="text-sm text-slate-400">Belum ada tier harga.</p>}
           {tiers.map((t) => (
             <div key={t.id} className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-ios-sm">
               <div>

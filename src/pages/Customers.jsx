@@ -123,7 +123,7 @@ const Customers = () => {
       <Card padded={false}>
         <div className="p-4 border-b border-white/10">
           <div className="relative max-w-md">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               className="w-full bg-slate-950/60 border border-white/10 rounded-ios-sm pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
               placeholder="Cari nama / kode / kontak..."
@@ -143,11 +143,11 @@ const Customers = () => {
                     {customer.name}
                     {!customer.is_active && <Badge tone="red">Nonaktif</Badge>}
                   </div>
-                  {customer.npwp && <div className="text-xs text-slate-500">NPWP: {customer.npwp}</div>}
+                  {customer.npwp && <div className="text-xs text-slate-400">NPWP: {customer.npwp}</div>}
                 </td>
                 <td className="px-4 py-3 text-slate-400 text-sm">
                   <div>{customer.contact_name || '-'}</div>
-                  <div className="text-xs text-slate-500">{customer.phone || ''}</div>
+                  <div className="text-xs text-slate-400">{customer.phone || ''}</div>
                 </td>
                 <td className="px-4 py-3 text-center text-slate-300 text-sm">
                   {customer.payment_term_days > 0 ? `Net ${customer.payment_term_days}` : 'Tunai'}
@@ -156,7 +156,7 @@ const Customers = () => {
                   {customer.credit_limit > 0 ? formatCurrency(customer.credit_limit) : 'Tanpa batas'}
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <span className={customer.outstanding > 0 ? 'text-ios-orange font-medium' : 'text-slate-500'}>
+                  <span className={customer.outstanding > 0 ? 'text-ios-orange font-medium' : 'text-slate-400'}>
                     {formatCurrency(customer.outstanding)}
                   </span>
                 </td>
@@ -217,7 +217,7 @@ const Customers = () => {
           <div className="sm:col-span-2">
             <Input as="textarea" label="Alamat" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
           </div>
-          <p className="sm:col-span-2 text-xs text-slate-500">Limit kredit 0 berarti tanpa batas. Kode pelanggan dibuat otomatis.</p>
+          <p className="sm:col-span-2 text-xs text-slate-400">Limit kredit 0 berarti tanpa batas. Kode pelanggan dibuat otomatis.</p>
         </div>
       </Modal>
     </div>

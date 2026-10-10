@@ -54,6 +54,18 @@ server {
         add_header Cache-Control "no-cache, must-revalidate";
     }
 
+    # Service worker & manifest harus selalu diverifikasi ulang agar update
+    # (aset ber-hash baru) langsung terbaca; SW basi dapat menyajikan shell lama.
+    location = /sw.js {
+        root /usr/share/nginx/html;
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
+    location = /manifest.webmanifest {
+        root /usr/share/nginx/html;
+        add_header Cache-Control "no-cache, must-revalidate";
+    }
+
     location /assets/ {
         root /usr/share/nginx/html;
         add_header Cache-Control "public, max-age=31536000, immutable";

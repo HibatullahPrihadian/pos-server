@@ -162,7 +162,7 @@ const StockOpname = () => {
         <div className="space-y-4">
           <Input label="Tanggal" type="date" value={createForm.date} onChange={(e) => setCreateForm({ ...createForm, date: e.target.value })} />
           <Input label="Catatan" value={createForm.note} onChange={(e) => setCreateForm({ ...createForm, note: e.target.value })} />
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-400">
             Opname akan memuat semua produk aktif dengan stok sistem. Anda mengisi jumlah fisik, lalu posting untuk menerapkan selisih.
           </p>
         </div>
@@ -176,7 +176,7 @@ const StockOpname = () => {
         footer={
           detail?.status === 'draft' ? (
             <div className="flex justify-between items-center">
-              <span className="text-xs text-slate-500">Perubahan hanya diterapkan saat posting.</span>
+              <span className="text-xs text-slate-400">Perubahan hanya diterapkan saat posting.</span>
               {canManage && (
                 <div className="flex gap-2">
                   <Button variant="neutral" onClick={saveCounts}>Simpan Hitungan</Button>
@@ -215,7 +215,7 @@ const StockOpname = () => {
             </div>
 
             <div className="relative mb-3">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 className="w-full bg-slate-950/60 border border-white/10 rounded-ios-sm pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
                 placeholder="Cari produk..."
@@ -242,7 +242,7 @@ const StockOpname = () => {
                       <tr key={item.id}>
                         <td className="px-3 py-2">
                           <div className="text-white">{item.product_name}</div>
-                          <div className="text-xs text-slate-500 font-mono">{item.sku}</div>
+                          <div className="text-xs text-slate-400 font-mono">{item.sku}</div>
                         </td>
                         <td className="px-3 py-2 text-right text-slate-400">{item.system_qty}</td>
                         <td className="px-3 py-2 text-right">
@@ -254,7 +254,7 @@ const StockOpname = () => {
                             onChange={(e) => setCounts({ ...counts, [item.product_id]: e.target.value })}
                           />
                         </td>
-                        <td className={`px-3 py-2 text-right font-medium ${diff > 0 ? 'text-ios-green' : diff < 0 ? 'text-ios-red' : 'text-slate-500'}`}>
+                        <td className={`px-3 py-2 text-right font-medium ${diff > 0 ? 'text-ios-green' : diff < 0 ? 'text-ios-red' : 'text-slate-400'}`}>
                           {diff > 0 ? '+' : ''}{diff}
                         </td>
                       </tr>

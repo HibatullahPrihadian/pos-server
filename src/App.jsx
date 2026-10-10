@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
@@ -7,39 +8,42 @@ import CartProvider from './context/CartContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './components/layout/MainLayout';
 
+// Login eager (paint pertama). Halaman lain di-code-split per route.
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import POS from './pages/POS';
-import Transactions from './pages/Transactions';
-import Products from './pages/Products';
-import Promotions from './pages/Promotions';
-import Bundles from './pages/Bundles';
-import Consignment from './pages/Consignment';
-import Attendance from './pages/Attendance';
-import Categories from './pages/Categories';
-import Suppliers from './pages/Suppliers';
-import Stock from './pages/Stock';
-import StockOpname from './pages/StockOpname';
-import Purchases from './pages/Purchases';
-import Expenses from './pages/Expenses';
-import Members from './pages/Members';
-import Customers from './pages/Customers';
-import Invoices from './pages/Invoices';
-import Shifts from './pages/Shifts';
-import Reports from './pages/Reports';
-import Users from './pages/Users';
-import Settings from './pages/Settings';
-import PrintServices from './pages/PrintServices';
-import PrintOrders from './pages/PrintOrders';
-import PrintOrderForm from './pages/PrintOrderForm';
-import PrintReports from './pages/PrintReports';
-import OwnerDashboard from './pages/OwnerDashboard';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const POS = lazy(() => import('./pages/POS'));
+const Transactions = lazy(() => import('./pages/Transactions'));
+const Products = lazy(() => import('./pages/Products'));
+const Promotions = lazy(() => import('./pages/Promotions'));
+const Bundles = lazy(() => import('./pages/Bundles'));
+const Consignment = lazy(() => import('./pages/Consignment'));
+const Attendance = lazy(() => import('./pages/Attendance'));
+const Categories = lazy(() => import('./pages/Categories'));
+const Suppliers = lazy(() => import('./pages/Suppliers'));
+const Stock = lazy(() => import('./pages/Stock'));
+const StockOpname = lazy(() => import('./pages/StockOpname'));
+const Purchases = lazy(() => import('./pages/Purchases'));
+const Expenses = lazy(() => import('./pages/Expenses'));
+const Members = lazy(() => import('./pages/Members'));
+const Customers = lazy(() => import('./pages/Customers'));
+const Invoices = lazy(() => import('./pages/Invoices'));
+const Shifts = lazy(() => import('./pages/Shifts'));
+const Reports = lazy(() => import('./pages/Reports'));
+const Users = lazy(() => import('./pages/Users'));
+const Settings = lazy(() => import('./pages/Settings'));
+const PrintServices = lazy(() => import('./pages/PrintServices'));
+const PrintOrders = lazy(() => import('./pages/PrintOrders'));
+const PrintOrderForm = lazy(() => import('./pages/PrintOrderForm'));
+const PrintReports = lazy(() => import('./pages/PrintReports'));
+const OwnerDashboard = lazy(() => import('./pages/OwnerDashboard'));
 
 // Halaman di dalam layout (butuh login). `permission` diproteksi di dua lapis:
 // route guard di sini dan penyembunyian menu di Sidebar.
 const Page = ({ children, permission }) => (
   <ProtectedRoute permission={permission}>
-    <MainLayout>{children}</MainLayout>
+    <MainLayout>
+      <Suspense fallback={<div className="p-6 text-sm opacity-60">Memuat…</div>}>{children}</Suspense>
+    </MainLayout>
   </ProtectedRoute>
 );
 

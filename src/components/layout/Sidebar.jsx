@@ -5,7 +5,7 @@ import {
   ClipboardList, ShoppingBag, Users, Clock, BarChart3, UserCog, Settings,
   LogOut, ChevronLeft, ChevronRight, Lock, Store, BadgePercent, PackagePlus,
   HandCoins, CalendarCheck, LogIn, LogOut as LogOutIcon, Wallet, Building2, FileText,
-  Printer, FilePlus2, ArrowLeftRight, LayoutGrid,
+  Printer, FilePlus2, ArrowLeftRight, LayoutGrid, X,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useBusiness, BUSINESS_META } from '../../context/BusinessContext';
@@ -100,7 +100,7 @@ const MENU_PRINT = [
   },
 ];
 
-const Sidebar = () => {
+const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const { user, can, logout } = useAuth();
   const { business, canSwitch, setBusiness, clearBusiness } = useBusiness();
@@ -160,24 +160,40 @@ const Sidebar = () => {
   };
 
   return (
-    <div
-      className={`h-screen bg-slate-900/65 backdrop-blur-glass text-slate-300 transition-all duration-300 flex flex-col border-r border-white/10 shrink-0 ${isCollapsed ? 'w-20' : 'w-64'}`}
-    >
-      <div className="p-4 flex items-center justify-between">
-        {!isCollapsed && (
-          <h1 className="text-lg font-bold text-white flex items-center gap-2">
-            <Store size={20} className="text-ios-blue" />
-            POS <span className="text-ios-blue">Mini</span>
-          </h1>
-        )}
-        <button
-          onClick={() => setIsCollapsed(!isCollapsed)}
-          className={`p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white transition-all ${isCollapsed ? 'mx-auto' : ''}`}
-          aria-label="Toggle sidebar"
-        >
-          {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
-        </button>
-      </div>
+    <>
+      {/* Backdrop mobile: hanya saat drawer terbuka di layar < md. */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+          onClick={onMobileClose}
+          aria-hidden="true"
+        />
+      )}
+      <div
+        className={`h-screen bg-slate-900/65 backdrop-blur-glass text-slate-300 transition-all duration-300 flex flex-col border-r border-white/10 shrink-0 fixed z-50 md:static md:z-auto md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} ${isCollapsed ? 'w-20' : 'w-64'}`}
+      >
+        <div className="p-4 flex items-center justify-between">
+          {!isCollapsed && (
+            <h1 className="text-lg font-bold text-white flex items-center gap-2">
+              <Store size={20} className="text-ios-blue" />
+              POS <span className="text-ios-blue">Mini</span>
+            </h1>
+          )}
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            className={`hidden md:block p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white transition-all ${isCollapsed ? 'mx-auto' : ''}`}
+            aria-label="Toggle sidebar"
+          >
+            {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
+          <button
+            onClick={onMobileClose}
+            className="md:hidden p-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white"
+            aria-label="Tutup menu"
+          >
+            <X size={18} />
+          </button>
+        </div>
 
       <nav className="flex-1 px-3 overflow-y-auto pb-4">
         {MENU.map((group) => {
@@ -187,7 +203,7 @@ const Sidebar = () => {
           return (
             <div key={group.section} className="mb-4">
               {!isCollapsed && (
-                <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                   {group.section}
                 </p>
               )}
@@ -199,6 +215,7 @@ const Sidebar = () => {
                       key={item.path}
                       to={item.path}
                       end={item.path === '/'}
+                      onClick={onMobileClose}
                       className={({ isActive }) =>
                         `flex items-center p-2.5 rounded-xl transition-colors text-sm ${isActive ? 'bg-ios-blue text-white shadow-glow-blue' : 'hover:bg-white/10 hover:text-white'} ${isCollapsed ? 'justify-center' : ''}`
                       }
@@ -276,7 +293,7 @@ const Sidebar = () => {
           </button>
         ) : (
           !isCollapsed && (
-            <div className="px-2 mb-1 text-xs text-slate-500 flex items-center gap-1">
+            <div className="px-2 mb-1 text-xs text-slate-400 flex items-center gap-1">
               <CalendarCheck size={12} /> Absensi hari ini selesai
             </div>
           )
@@ -290,7 +307,8 @@ const Sidebar = () => {
           {!isCollapsed && <span>Keluar</span>}
         </button>
       </div>
-    </div>
+      </div>
+    </>
   );
 };
 

@@ -417,7 +417,7 @@ const Purchases = () => {
                   className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 flex justify-between"
                 >
                   <span className="text-white">{product.name}</span>
-                  <span className="text-slate-500 font-mono text-xs">{product.sku}</span>
+                  <span className="text-slate-400 font-mono text-xs">{product.sku}</span>
                 </button>
               ))}
             </div>
@@ -439,7 +439,7 @@ const Purchases = () => {
             <tr key={index}>
               <td className="px-4 py-2">
                 <div className="text-white">{line.name}</div>
-                <div className="text-xs text-slate-500 font-mono">{line.sku}</div>
+                <div className="text-xs text-slate-400 font-mono">{line.sku}</div>
               </td>
               <td className="px-4 py-2">
                 <select

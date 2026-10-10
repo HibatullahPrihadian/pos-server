@@ -126,7 +126,7 @@ const Settings = () => {
               value={form.expiry_warning_days}
               onChange={(e) => setForm({ ...form, expiry_warning_days: e.target.value })}
             />
-            <p className="text-xs text-slate-500 -mt-2">Batch dengan kadaluarsa ≤ ambang ini muncul di dashboard (default 180 hari).</p>
+            <p className="text-xs text-slate-400 -mt-2">Batch dengan kadaluarsa ≤ ambang ini muncul di dashboard (default 180 hari).</p>
             <Input as="select" label="Izinkan Stok Negatif" value={form.allow_negative_stock ? '1' : '0'} onChange={(e) => setForm({ ...form, allow_negative_stock: e.target.value === '1' })}>
               <option value="0">Tidak (disarankan)</option>
               <option value="1">Ya</option>
@@ -140,7 +140,7 @@ const Settings = () => {
             {settings?.qris_image_path ? (
               <img src={settings.qris_image_path} alt="QRIS" className="w-56 h-56 object-contain bg-white rounded-ios-sm border border-white/10 p-2" />
             ) : (
-              <div className="w-56 h-56 flex flex-col items-center justify-center bg-white/5 rounded-ios-sm border border-dashed border-white/20 text-slate-500">
+              <div className="w-56 h-56 flex flex-col items-center justify-center bg-white/5 rounded-ios-sm border border-dashed border-white/20 text-slate-400">
                 <QrCode size={40} />
                 <span className="text-xs mt-2">Belum ada gambar QRIS</span>
               </div>
@@ -151,7 +151,7 @@ const Settings = () => {
                 <Upload size={16} /> {uploading ? 'Mengunggah...' : 'Unggah QRIS'}
               </span>
             </label>
-            <p className="text-xs text-slate-500">Gambar ini ditampilkan di layar kasir saat pembayaran QRIS.</p>
+            <p className="text-xs text-slate-400">Gambar ini ditampilkan di layar kasir saat pembayaran QRIS.</p>
           </div>
         </Card>
       </div>

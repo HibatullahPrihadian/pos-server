@@ -585,7 +585,7 @@ const PrintOrderForm = () => {
                 </Button>
               )}
             </div>
-            <p className="text-xs text-slate-500 mt-3 flex items-center gap-1">
+            <p className="text-xs text-slate-400 mt-3 flex items-center gap-1">
               <Printer size={12} /> Nomor antrian dibuat otomatis saat disimpan.
               <Link to="/print-services" className="text-ios-blue hover:underline ml-auto">Kelola jasa</Link>
             </p>

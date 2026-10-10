@@ -16,7 +16,7 @@ const Table = ({ columns, children, empty, loading }) => (
       <tbody className="divide-y divide-white/5">
         {loading ? (
           <tr>
-            <td colSpan={columns.length} className="px-4 py-10 text-center text-slate-500">
+            <td colSpan={columns.length} className="px-4 py-10 text-center text-slate-400">
               Memuat data...
             </td>
           </tr>
@@ -26,7 +26,7 @@ const Table = ({ columns, children, empty, loading }) => (
       </tbody>
     </table>
     {!loading && empty && (
-      <div className="px-4 py-10 text-center text-sm text-slate-500">{empty}</div>
+      <div className="px-4 py-10 text-center text-sm text-slate-400">{empty}</div>
     )}
   </div>
 );

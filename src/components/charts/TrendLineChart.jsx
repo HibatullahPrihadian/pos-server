@@ -45,7 +45,7 @@ const TrendLineChart = ({ data, emptyLabel = 'Belum ada data penjualan' }) => {
   if (!hasSales) {
     return (
       <div className="flex-1 min-h-48 flex items-center justify-center">
-        <p className="text-sm text-slate-500 text-center">{emptyLabel}</p>
+        <p className="text-sm text-slate-400 text-center">{emptyLabel}</p>
       </div>
     );
   }

@@ -728,6 +728,37 @@ CREATE TABLE IF NOT EXISTS print_services (
 -- Master jasa dibagi per usaha (semua jasa lama = fotokopi).
 ALTER TABLE print_services ADD COLUMN IF NOT EXISTS business VARCHAR(20) NOT NULL DEFAULT 'fotokopi';
 
+-- Seed master jasa fotokopi (idempotent, pola WHERE NOT EXISTS seperti seed.sql).
+-- DB baru dapat otomatis via docker-entrypoint; DB lama tinggal rerun init.sql sekali.
+-- Baris seed = data biasa: bisa dihapus/dinonaktifkan via Master Jasa.
+INSERT INTO print_services (name, business, category, paper_size, color_mode, price_per_page, price_per_sheet, min_qty, is_active)
+SELECT 'Fotokopi A4 Hitam Putih', 'fotokopi', 'fotokopi', 'A4', 'bw', 0, 500, 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM print_services WHERE name = 'Fotokopi A4 Hitam Putih' AND business = 'fotokopi');
+
+INSERT INTO print_services (name, business, category, paper_size, color_mode, price_per_page, price_per_sheet, min_qty, is_active)
+SELECT 'Fotokopi F4 Hitam Putih', 'fotokopi', 'fotokopi', 'F4', 'bw', 0, 600, 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM print_services WHERE name = 'Fotokopi F4 Hitam Putih' AND business = 'fotokopi');
+
+INSERT INTO print_services (name, business, category, paper_size, color_mode, price_per_page, price_per_sheet, min_qty, is_active)
+SELECT 'Print A4 Hitam Putih', 'fotokopi', 'print', 'A4', 'bw', 0, 1000, 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM print_services WHERE name = 'Print A4 Hitam Putih' AND business = 'fotokopi');
+
+INSERT INTO print_services (name, business, category, paper_size, color_mode, price_per_page, price_per_sheet, min_qty, is_active)
+SELECT 'Print A4 Warna', 'fotokopi', 'print', 'A4', 'color', 2500, 0, 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM print_services WHERE name = 'Print A4 Warna' AND business = 'fotokopi');
+
+INSERT INTO print_services (name, business, category, paper_size, color_mode, price_per_page, price_per_sheet, min_qty, is_active)
+SELECT 'Scan Dokumen', 'fotokopi', 'scan', CAST(NULL AS VARCHAR(20)), CAST(NULL AS VARCHAR(10)), 0, 2000, 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM print_services WHERE name = 'Scan Dokumen' AND business = 'fotokopi');
+
+INSERT INTO print_services (name, business, category, paper_size, color_mode, price_per_page, price_per_sheet, min_qty, is_active)
+SELECT 'Laminating A4', 'fotokopi', 'laminating', 'A4', CAST(NULL AS VARCHAR(10)), 0, 10000, 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM print_services WHERE name = 'Laminating A4' AND business = 'fotokopi');
+
+INSERT INTO print_services (name, business, category, paper_size, color_mode, price_per_page, price_per_sheet, min_qty, is_active)
+SELECT 'Jilid Spiral A4', 'fotokopi', 'jilid', 'A4', CAST(NULL AS VARCHAR(10)), 0, 15000, 1, TRUE
+WHERE NOT EXISTS (SELECT 1 FROM print_services WHERE name = 'Jilid Spiral A4' AND business = 'fotokopi');
+
 -- Pesanan fotokopi + antrian harian. Total disimpan agar nota & laporan stabil.
 CREATE TABLE IF NOT EXISTS print_orders (
     id SERIAL PRIMARY KEY,

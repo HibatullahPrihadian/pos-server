@@ -216,10 +216,10 @@ const Reports = () => {
   };
 
   const renderTable = () => {
-    if (!data || dataTab !== tab) return <p className="text-sm text-slate-500 py-8 text-center">Tidak ada data</p>;
+    if (!data || dataTab !== tab) return <p className="text-sm text-slate-400 py-8 text-center">Tidak ada data</p>;
 
     if (tab === 'sales-summary') {
-      if (!data.totals) return <p className="text-sm text-slate-500 py-8 text-center">Data tidak tersedia</p>;
+      if (!data.totals) return <p className="text-sm text-slate-400 py-8 text-center">Data tidak tersedia</p>;
       return (
         <>
           <div className="grid grid-cols-4 gap-3 mb-4">
@@ -305,7 +305,7 @@ const Reports = () => {
     }
 
     if (tab === 'gross-profit') {
-      if (!data.summary) return <p className="text-sm text-slate-500 py-8 text-center">Data tidak tersedia</p>;
+      if (!data.summary) return <p className="text-sm text-slate-400 py-8 text-center">Data tidak tersedia</p>;
       return (
         <>
           <div className="grid grid-cols-3 gap-3 mb-4">
@@ -342,7 +342,7 @@ const Reports = () => {
     }
 
     if (tab === 'profit-loss') {
-      if (!data.summary) return <p className="text-sm text-slate-500 py-8 text-center">Data tidak tersedia</p>;
+      if (!data.summary) return <p className="text-sm text-slate-400 py-8 text-center">Data tidak tersedia</p>;
       return (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-4">
@@ -394,7 +394,7 @@ const Reports = () => {
                   <span className="text-sm text-slate-300">Payout Penitip (Konsinyasi)</span>
                   <span className="text-white">{formatCurrency(data.info?.consignment_payout ?? 0)}</span>
                 </div>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-400">
                   Pembelian Stok = total PO periode ini; Sudah Dibayar (Modal) = PO yang sudah lunas
                   penuh. Selisihnya adalah PO yang belum lunas penuh. Keduanya mengubah kas menjadi
                   persediaan (aset), bukan beban; HPP sudah otomatis dikurangkan saat barang terjual.
@@ -431,7 +431,7 @@ const Reports = () => {
     }
 
     if (tab === 'purchase-paid') {
-      if (!data.summary) return <p className="text-sm text-slate-500 py-8 text-center">Data tidak tersedia</p>;
+      if (!data.summary) return <p className="text-sm text-slate-400 py-8 text-center">Data tidak tersedia</p>;
       return (
         <>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
@@ -447,7 +447,7 @@ const Reports = () => {
             ))}
           </div>
 
-          <p className="text-xs text-slate-500 mb-4">
+          <p className="text-xs text-slate-400 mb-4">
             Hanya PO yang sudah dibayar penuh ke supplier. Modal pembelian mengubah kas menjadi
             persediaan (aset); bukan beban laba — HPP sudah otomatis dikurangkan saat barang terjual.
           </p>
@@ -496,7 +496,7 @@ const Reports = () => {
             <tr key={row.product_id} className="hover:bg-white/5">
               <td className="px-4 py-2">
                 <div className="text-white">{row.product_name}</div>
-                <div className="text-xs text-slate-500 font-mono">{row.sku}</div>
+                <div className="text-xs text-slate-400 font-mono">{row.sku}</div>
               </td>
               <td className="px-4 py-2 text-right text-slate-300">{row.qty_sold} {row.base_unit}</td>
               <td className="px-4 py-2 text-right text-white">{formatCurrency(row.revenue)}</td>
@@ -621,7 +621,7 @@ const Reports = () => {
               <input
                 type="text"
                 placeholder="Cari kode/invoice"
-                className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-ios-blue/60"
+                className="bg-slate-950/60 border border-white/10 rounded-ios-sm px-3 py-2 text-sm text-white placeholder:text-slate-400 focus:outline-none focus:border-ios-blue/60"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
               />
@@ -647,7 +647,7 @@ const Reports = () => {
 
         <div className="p-4">
           {loading ? (
-            <p className="text-sm text-slate-500 py-8 text-center">Memuat laporan...</p>
+            <p className="text-sm text-slate-400 py-8 text-center">Memuat laporan...</p>
           ) : (
             renderTable()
           )}

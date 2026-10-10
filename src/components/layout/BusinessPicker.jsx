@@ -67,7 +67,7 @@ const BusinessPicker = () => {
             <LogOut size={16} /> Keluar
           </Button>
         </div>
-        <p className="flex items-center justify-center gap-1 text-xs text-slate-500 mt-2">
+        <p className="flex items-center justify-center gap-1 text-xs text-slate-400 mt-2">
           <Lock size={10} /> Mode aktif hanya berlaku untuk sesi ini
         </p>
       </div>

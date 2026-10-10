@@ -62,22 +62,22 @@ const OwnerDashboard = () => {
         <Card>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Penjualan Hari Ini</p>
           <p className="text-2xl font-bold text-white mt-2">{formatCurrency(data.totals.today_grand_total)}</p>
-          <p className="text-xs text-slate-500 mt-1">{data.totals.today_txn_count} transaksi (semua usaha)</p>
+          <p className="text-xs text-slate-400 mt-1">{data.totals.today_txn_count} transaksi (semua usaha)</p>
         </Card>
         <Card>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Penjualan Bulan Ini</p>
           <p className="text-2xl font-bold text-white mt-2">{formatCurrency(data.totals.month_grand_total)}</p>
-          <p className="text-xs text-slate-500 mt-1">{data.totals.month_txn_count} transaksi</p>
+          <p className="text-xs text-slate-400 mt-1">{data.totals.month_txn_count} transaksi</p>
         </Card>
         <Card>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Antrian Fotokopi</p>
           <p className="text-2xl font-bold text-white mt-2">{data.fotokopi.active_queue}</p>
-          <p className="text-xs text-slate-500 mt-1">antre / diproses / siap</p>
+          <p className="text-xs text-slate-400 mt-1">antre / diproses / siap</p>
         </Card>
         <Card>
           <p className="text-xs text-slate-400 uppercase tracking-wide">Jasa Fotokopi Hari Ini</p>
           <p className="text-2xl font-bold text-white mt-2">{formatCurrency(data.fotokopi.today_revenue)}</p>
-          <p className="text-xs text-slate-500 mt-1">{data.fotokopi.today_orders} pesanan lunas</p>
+          <p className="text-xs text-slate-400 mt-1">{data.fotokopi.today_orders} pesanan lunas</p>
         </Card>
       </div>
 
@@ -125,12 +125,12 @@ const OwnerDashboard = () => {
                 <div className="p-3 rounded-ios-sm bg-white/5">
                   <p className="text-xs text-slate-400 flex items-center gap-1"><TrendingUp size={12} /> Hari ini</p>
                   <p className="text-lg font-bold text-white mt-1">{formatCurrency(b.today.grand_total)}</p>
-                  <p className="text-xs text-slate-500">{b.today.txn_count} transaksi</p>
+                  <p className="text-xs text-slate-400">{b.today.txn_count} transaksi</p>
                 </div>
                 <div className="p-3 rounded-ios-sm bg-white/5">
                   <p className="text-xs text-slate-400 flex items-center gap-1"><Receipt size={12} /> Bulan ini</p>
                   <p className="text-lg font-bold text-white mt-1">{formatCurrency(b.month.grand_total)}</p>
-                  <p className="text-xs text-slate-500">{b.month.txn_count} transaksi</p>
+                  <p className="text-xs text-slate-400">{b.month.txn_count} transaksi</p>
                 </div>
               </div>
 

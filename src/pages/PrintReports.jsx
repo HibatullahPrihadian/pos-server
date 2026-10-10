@@ -172,7 +172,7 @@ const PrintReports = () => {
             <div>
               <p className="text-xs text-slate-400 uppercase tracking-wide">Pesanan Lunas</p>
               <p className="text-2xl font-bold text-white mt-2">{totals.order_count}</p>
-              <p className="text-xs text-slate-500 mt-1">periode terpilih</p>
+              <p className="text-xs text-slate-400 mt-1">periode terpilih</p>
             </div>
             <div className="p-3 rounded-ios-sm border bg-ios-blue/15 border-ios-blue/30 text-ios-blue">
               <ClipboardList size={20} />
@@ -184,7 +184,7 @@ const PrintReports = () => {
             <div>
               <p className="text-xs text-slate-400 uppercase tracking-wide">Pendapatan</p>
               <p className="text-2xl font-bold text-white mt-2">{formatCurrency(totals.grand_total)}</p>
-              <p className="text-xs text-slate-500 mt-1">PPN {formatCurrency(totals.tax_total)}</p>
+              <p className="text-xs text-slate-400 mt-1">PPN {formatCurrency(totals.tax_total)}</p>
             </div>
             <div className="p-3 rounded-ios-sm border bg-ios-green/15 border-ios-green/30 text-ios-green">
               <Wallet size={20} />
@@ -196,7 +196,7 @@ const PrintReports = () => {
             <div>
               <p className="text-xs text-slate-400 uppercase tracking-wide">Pesanan Periode</p>
               <p className="text-2xl font-bold text-white mt-2">{queue?.total ?? 0}</p>
-              <p className="text-xs text-slate-500 mt-1">{queue?.paid ?? 0} sudah dibayar</p>
+              <p className="text-xs text-slate-400 mt-1">{queue?.paid ?? 0} sudah dibayar</p>
             </div>
             <div className="p-3 rounded-ios-sm border bg-ios-purple/15 border-ios-purple/30 text-ios-purple">
               <Printer size={20} />
@@ -261,7 +261,7 @@ const PrintReports = () => {
                   <tr key={row.service_id} className="hover:bg-white/5">
                     <td className="px-4 py-3 text-white">
                       {row.service_name}
-                      {row.category && <span className="block text-xs text-slate-500 capitalize">{row.category}</span>}
+                      {row.category && <span className="block text-xs text-slate-400 capitalize">{row.category}</span>}
                     </td>
                     <td className="px-4 py-3 text-right text-slate-400">{row.sheets}</td>
                     <td className="px-4 py-3 text-right text-slate-300">{formatCurrency(row.revenue)}</td>

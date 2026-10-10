@@ -108,7 +108,7 @@ const Members = () => {
       <Card padded={false}>
         <div className="p-4 border-b border-white/10">
           <div className="relative max-w-md">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               className="w-full bg-slate-950/60 border border-white/10 rounded-ios-sm pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
               placeholder="Cari nama / kode / telepon..."
@@ -128,7 +128,7 @@ const Members = () => {
                     {member.name}
                     {!member.is_active && <Badge tone="red">Nonaktif</Badge>}
                   </div>
-                  {member.email && <div className="text-xs text-slate-500">{member.email}</div>}
+                  {member.email && <div className="text-xs text-slate-400">{member.email}</div>}
                 </td>
                 <td className="px-4 py-3 text-slate-400">{member.phone || '-'}</td>
                 <td className="px-4 py-3 text-right">
@@ -166,7 +166,7 @@ const Members = () => {
           <Input label="Nama *" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} autoFocus />
           <Input label="Telepon" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           <Input label="Email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-          <p className="text-xs text-slate-500">Kode member dibuat otomatis bila dikosongkan.</p>
+          <p className="text-xs text-slate-400">Kode member dibuat otomatis bila dikosongkan.</p>
         </div>
       </Modal>
 
@@ -188,7 +188,7 @@ const Members = () => {
 
             <p className="text-sm font-medium text-white mb-2">Riwayat Poin</p>
             <div className="space-y-2 max-h-64 overflow-y-auto">
-              {pointsData.logs.length === 0 && <p className="text-sm text-slate-500">Belum ada riwayat.</p>}
+              {pointsData.logs.length === 0 && <p className="text-sm text-slate-400">Belum ada riwayat.</p>}
               {pointsData.logs.map((log) => (
                 <div key={log.id} className="flex items-center justify-between px-3 py-2 bg-white/5 rounded-ios-sm text-sm">
                   <div>
@@ -199,7 +199,7 @@ const Members = () => {
                   </div>
                   <div className="text-right">
                     <div className="text-white">{log.balance_after}</div>
-                    <div className="text-xs text-slate-500">{formatDate(log.created_at)}</div>
+                    <div className="text-xs text-slate-400">{formatDate(log.created_at)}</div>
                   </div>
                 </div>
               ))}

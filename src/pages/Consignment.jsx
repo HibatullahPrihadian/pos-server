@@ -231,7 +231,7 @@ const Consignment = () => {
       {tab === 'products' && (
         <Card padded={false}>
           <div className="p-4">
-            <p className="text-xs text-slate-500 mb-3">
+            <p className="text-xs text-slate-400 mb-3">
               Produk konsinyasi ditandai dari halaman Produk (toggle &quot;Barang Titipan&quot;). Barang masuk stok melalui Pembelian/Penerimaan.
             </p>
             <Table

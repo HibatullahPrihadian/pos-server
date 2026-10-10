@@ -196,7 +196,7 @@ const PrintServices = () => {
             </Input>
           </div>
         </div>
-        <p className="text-xs text-slate-500 mt-4">
+        <p className="text-xs text-slate-400 mt-4">
           Kosongkan harga paket bila tidak memakai skema paket. Isi minimal salah satu harga.
         </p>
       </Modal>

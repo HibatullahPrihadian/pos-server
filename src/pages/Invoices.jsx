@@ -229,7 +229,7 @@ const Invoices = () => {
             <div>
               <p className="text-xs text-slate-400 uppercase tracking-wide">Total Piutang</p>
               <p className="text-xl font-bold text-white mt-1">{formatCurrency(summary?.outstanding_total ?? 0)}</p>
-              <p className="text-xs text-slate-500 mt-1">{summary?.unpaid_count ?? 0} invoice belum lunas</p>
+              <p className="text-xs text-slate-400 mt-1">{summary?.unpaid_count ?? 0} invoice belum lunas</p>
             </div>
             <div className="p-3 rounded-ios-sm border bg-ios-blue/15 border-ios-blue/30 text-ios-blue"><Wallet size={20} /></div>
           </div>
@@ -239,7 +239,7 @@ const Invoices = () => {
             <div>
               <p className="text-xs text-slate-400 uppercase tracking-wide">Lewat Jatuh Tempo</p>
               <p className="text-xl font-bold text-ios-red mt-1">{formatCurrency(summary?.overdue_total ?? 0)}</p>
-              <p className="text-xs text-slate-500 mt-1">{summary?.overdue_count ?? 0} invoice</p>
+              <p className="text-xs text-slate-400 mt-1">{summary?.overdue_count ?? 0} invoice</p>
             </div>
             <div className="p-3 rounded-ios-sm border bg-ios-red/15 border-ios-red/30 text-ios-red"><AlertTriangle size={20} /></div>
           </div>
@@ -249,7 +249,7 @@ const Invoices = () => {
             <div>
               <p className="text-xs text-slate-400 uppercase tracking-wide">Invoice Belum Lunas</p>
               <p className="text-xl font-bold text-white mt-1">{summary?.unpaid_count ?? 0}</p>
-              <p className="text-xs text-slate-500 mt-1">perlu ditindaklanjuti</p>
+              <p className="text-xs text-slate-400 mt-1">perlu ditindaklanjuti</p>
             </div>
             <div className="p-3 rounded-ios-sm border bg-ios-orange/15 border-ios-orange/30 text-ios-orange"><Receipt size={20} /></div>
           </div>
@@ -259,7 +259,7 @@ const Invoices = () => {
       <Card padded={false}>
         <div className="p-4 border-b border-white/10 flex flex-wrap items-end gap-3">
           <div className="relative flex-1 min-w-[200px]">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               className="w-full bg-slate-950/60 border border-white/10 rounded-ios-sm pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-ios-blue/60"
               placeholder="Cari no invoice / pelanggan..."
@@ -342,12 +342,12 @@ const Invoices = () => {
         ) : (
           <div className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-              <div><div className="text-xs text-slate-500">Pelanggan</div><div className="text-white">{detail.customer_name || '-'}</div></div>
-              <div><div className="text-xs text-slate-500">Tanggal</div><div className="text-white">{formatDate(detail.created_at)}</div></div>
-              <div><div className="text-xs text-slate-500">Jatuh Tempo</div><div className={detail.is_overdue ? 'text-ios-red' : 'text-white'}>{detail.due_date ? formatDate(detail.due_date) : '-'}</div></div>
-              <div><div className="text-xs text-slate-500">Total</div><div className="text-white font-medium">{formatCurrency(detail.grand_total)}</div></div>
-              <div><div className="text-xs text-slate-500">Dibayar</div><div className="text-ios-green">{formatCurrency(detail.paid_amount)}</div></div>
-              <div><div className="text-xs text-slate-500">Sisa Tagihan</div><div className="text-ios-orange font-medium">{formatCurrency(outstanding)}</div></div>
+              <div><div className="text-xs text-slate-400">Pelanggan</div><div className="text-white">{detail.customer_name || '-'}</div></div>
+              <div><div className="text-xs text-slate-400">Tanggal</div><div className="text-white">{formatDate(detail.created_at)}</div></div>
+              <div><div className="text-xs text-slate-400">Jatuh Tempo</div><div className={detail.is_overdue ? 'text-ios-red' : 'text-white'}>{detail.due_date ? formatDate(detail.due_date) : '-'}</div></div>
+              <div><div className="text-xs text-slate-400">Total</div><div className="text-white font-medium">{formatCurrency(detail.grand_total)}</div></div>
+              <div><div className="text-xs text-slate-400">Dibayar</div><div className="text-ios-green">{formatCurrency(detail.paid_amount)}</div></div>
+              <div><div className="text-xs text-slate-400">Sisa Tagihan</div><div className="text-ios-orange font-medium">{formatCurrency(outstanding)}</div></div>
             </div>
 
             <Table columns={[
@@ -369,7 +369,7 @@ const Invoices = () => {
             <div>
               <p className="text-sm font-medium text-white mb-2">Riwayat Pembayaran</p>
               {detail.payments.length === 0 ? (
-                <p className="text-sm text-slate-500">Belum ada pembayaran.</p>
+                <p className="text-sm text-slate-400">Belum ada pembayaran.</p>
               ) : (
                 <div className="space-y-2">
                   {detail.payments.map((p) => (
@@ -377,9 +377,9 @@ const Invoices = () => {
                       <div>
                         <span className="text-white">{formatCurrency(p.amount)}</span>
                         <span className="text-slate-400 ml-2">{PAYMENT_LABELS[p.method] || p.method}</span>
-                        {p.note && <span className="text-slate-500 ml-2">· {p.note}</span>}
+                        {p.note && <span className="text-slate-400 ml-2">· {p.note}</span>}
                       </div>
-                      <div className="text-xs text-slate-500 text-right">
+                      <div className="text-xs text-slate-400 text-right">
                         <div>{formatDate(p.paid_at)}</div>
                         {p.user_name && <div>{p.user_name}</div>}
                       </div>
@@ -416,7 +416,7 @@ const Invoices = () => {
           </Input>
           <Input label="Referensi (opsional)" value={payForm.reference} onChange={(e) => setPayForm({ ...payForm, reference: e.target.value })} />
           <Input label="Catatan (opsional)" value={payForm.note} onChange={(e) => setPayForm({ ...payForm, note: e.target.value })} />
-          <p className="text-xs text-slate-500">Pembayaran piutang tidak masuk kas shift kasir.</p>
+          <p className="text-xs text-slate-400">Pembayaran piutang tidak masuk kas shift kasir.</p>
         </div>
       </Modal>
 

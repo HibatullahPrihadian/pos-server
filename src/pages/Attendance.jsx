@@ -200,7 +200,7 @@ const Attendance = () => {
                 <td className="px-4 py-3 text-center text-slate-300">{s.days_present}</td>
                 <td className="px-4 py-3 text-right text-slate-300">{s.worked_hours} jam</td>
                 <td className="px-4 py-3 text-center">
-                  {s.incomplete_days > 0 ? <Badge tone="orange">{s.incomplete_days}</Badge> : <span className="text-slate-500">0</span>}
+                  {s.incomplete_days > 0 ? <Badge tone="orange">{s.incomplete_days}</Badge> : <span className="text-slate-400">0</span>}
                 </td>
               </tr>
             ))}
@@ -231,7 +231,7 @@ const Attendance = () => {
                 <td className="px-4 py-3 text-slate-400 text-sm">{row.check_in ? formatDateTime(row.check_in) : '-'}</td>
                 <td className="px-4 py-3 text-slate-400 text-sm">{row.check_out ? formatDateTime(row.check_out) : <Badge tone="orange">Belum</Badge>}</td>
                 <td className="px-4 py-3 text-slate-300">{formatDuration(row.check_in, row.check_out)}</td>
-                <td className="px-4 py-3 text-slate-500 text-xs">{row.note || '-'}</td>
+                <td className="px-4 py-3 text-slate-400 text-xs">{row.note || '-'}</td>
                 {canManage && (
                   <td className="px-4 py-3 text-right">
                     <Button variant="ghost" size="sm" onClick={() => openManual(row)}>Koreksi</Button>

@@ -199,7 +199,7 @@ const Bundles = () => {
                 <td className="px-4 py-3 font-mono text-xs text-slate-400">{bundle.sku}</td>
                 <td className="px-4 py-3 text-white">
                   <button className="hover:text-ios-blue text-left" onClick={() => viewDetail(bundle)}>{bundle.name}</button>
-                  {bundle.barcode && <div className="text-xs text-slate-500 font-mono">{bundle.barcode}</div>}
+                  {bundle.barcode && <div className="text-xs text-slate-400 font-mono">{bundle.barcode}</div>}
                 </td>
                 <td className="px-4 py-3 text-right text-ios-green">{formatCurrency(bundle.price)}</td>
                 <td className="px-4 py-3 text-center text-slate-300">{bundle.item_count} item</td>
@@ -290,7 +290,7 @@ const Bundles = () => {
               </div>
             ))}
           </div>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-slate-400">
             HPP total komponen: {formatCurrency(componentCost)}. Paket dijual dengan harga tetap di atas, tanpa tier/promo item.
           </p>
         </div>

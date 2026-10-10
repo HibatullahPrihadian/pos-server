@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import BusinessPicker from './BusinessPicker';
@@ -6,6 +7,7 @@ import { useBusiness } from '../../context/BusinessContext';
 
 const MainLayout = ({ children }) => {
   const { business, needsChoice } = useBusiness();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   // Tahan mount halaman sampai mode usaha final: header X-Business dibaca dari
   // penyimpanan, sehingga request sebelum mode siap bisa salah usaha (403).
@@ -21,11 +23,11 @@ const MainLayout = ({ children }) => {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar />
+      <Sidebar mobileOpen={mobileOpen} onMobileClose={() => setMobileOpen(false)} />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Topbar />
+        <Topbar onMenuClick={() => setMobileOpen(true)} />
         <main className="flex-1 overflow-y-auto">
-          <div className="max-w-[1500px] mx-auto p-6">{children}</div>
+          <div className="max-w-[1500px] mx-auto p-4 md:p-6">{children}</div>
         </main>
       </div>
     </div>

@@ -30,7 +30,7 @@ const KPI = ({ icon: Icon, label, value, sub, tone = 'blue', to }) => {
         <div>
           <p className="text-xs text-slate-400 uppercase tracking-wide">{label}</p>
           <p className="text-2xl font-bold text-white mt-2">{value}</p>
-          <p className="text-xs text-slate-500 mt-1">{sub || '\u00A0'}</p>
+          <p className="text-xs text-slate-400 mt-1">{sub || '\u00A0'}</p>
         </div>
         <div className={`p-3 rounded-ios-sm border ${tones[tone]}`}>
           <Icon size={20} />
@@ -331,13 +331,13 @@ const MinimarketDashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <Card title="Produk Terlaris (30 hari)">
           {data.top_products.length === 0 ? (
-            <p className="text-sm text-slate-500">Belum ada penjualan</p>
+            <p className="text-sm text-slate-400">Belum ada penjualan</p>
           ) : (
             <div className="space-y-2">
               {data.top_products.map((product, index) => (
                 <div key={index} className="flex items-center justify-between text-sm">
                   <span className="text-slate-300 flex items-center gap-2 truncate">
-                    <span className="w-5 text-slate-500">{index + 1}.</span>
+                    <span className="w-5 text-slate-400">{index + 1}.</span>
                     {product.product_name}
                   </span>
                   <Badge tone="blue">{product.qty_sold}</Badge>
@@ -349,17 +349,17 @@ const MinimarketDashboard = () => {
 
         <Card title="Batch Akan/ Sudah Kadaluarsa">
           {(!expiring || (expiring.expiring.length === 0 && expiring.expired.length === 0)) ? (
-            <p className="text-sm text-slate-500">Tidak ada batch mendekati kadaluarsa</p>
+            <p className="text-sm text-slate-400">Tidak ada batch mendekati kadaluarsa</p>
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {[...expiring.expired, ...expiring.expiring].slice(0, 8).map((batch) => (
                 <div key={batch.id} className="flex items-center justify-between text-sm gap-2">
                   <span className="text-slate-300 truncate">
                     {batch.product_name}
-                    {batch.batch_code ? <span className="text-slate-500"> · {batch.batch_code}</span> : null}
+                    {batch.batch_code ? <span className="text-slate-400"> · {batch.batch_code}</span> : null}
                   </span>
                   <span className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-slate-500">{formatDate(batch.expiry_date)}</span>
+                    <span className="text-xs text-slate-400">{formatDate(batch.expiry_date)}</span>
                     <Badge tone={batch.is_expired ? 'red' : 'orange'}>{batch.qty_remaining}</Badge>
                   </span>
                 </div>

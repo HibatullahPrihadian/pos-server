@@ -227,7 +227,7 @@ const PrintOrders = () => {
                   <td className="px-4 py-3 text-slate-300 text-xs">{row.code}</td>
                   <td className="px-4 py-3 text-white">
                     {row.customer_name || '-'}
-                    <span className="block text-xs text-slate-500">{formatDateTime(row.created_at)}</span>
+                    <span className="block text-xs text-slate-400">{formatDateTime(row.created_at)}</span>
                   </td>
                   <td className="px-4 py-3 text-right text-white font-medium">{formatCurrency(row.grand_total)}</td>
                   <td className="px-4 py-3 text-center">
@@ -352,11 +352,11 @@ const PrintOrders = () => {
                     <span className="text-slate-300">
                       {item.description || item.display_name || item.service_name}
                       {item.product_id ? (
-                        <span className="block text-xs text-slate-500">
+                        <span className="block text-xs text-slate-400">
                           Produk{item.unit_name ? ` · ${item.unit_name}` : ''}
                         </span>
                       ) : (
-                        <span className="block text-xs text-slate-500">
+                        <span className="block text-xs text-slate-400">
                           {item.pages} hal × {item.copies} rangkap
                           {item.sides === 'double' ? ' · bolak-balik' : ''}
                           {item.paper_size ? ` · ${item.paper_size}` : ''}
@@ -365,7 +365,7 @@ const PrintOrders = () => {
                     </span>
                     <span className="text-right shrink-0">
                       <span className="block text-white">{formatCurrency(item.line_total)}</span>
-                      <span className="block text-xs text-slate-500">
+                      <span className="block text-xs text-slate-400">
                         {item.qty} {item.product_id ? (item.unit_name || 'pcs') : 'lembar'}
                       </span>
                     </span>
@@ -412,7 +412,7 @@ const PrintOrders = () => {
             {shift === undefined ? (
               <Spinner label="Memeriksa shift..." />
             ) : shift ? (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-400">
                 Shift aktif: #{shift.id} · kas awal {formatCurrency(shift.opening_cash)}
               </p>
             ) : (
