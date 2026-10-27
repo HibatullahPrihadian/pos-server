@@ -12,6 +12,7 @@ import { useBusiness, BUSINESS_META } from '../../context/BusinessContext';
 import { api } from '../../api/client';
 import { useToastContext } from '../../context/ToastContext';
 import useDeskMode from '../../hooks/useDeskMode';
+import useAppVersion from '../../hooks/useAppVersion';
 
 // Menu dikelompokkan; `permission` menyembunyikan item dari user tanpa izin.
 const MENU_MINIMARKET = [
@@ -110,6 +111,8 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
   const { business, canSwitch, setBusiness, clearBusiness } = useBusiness();
   const toast = useToastContext();
   const navigate = useNavigate();
+  // Nomor versi aplikasi untuk ditampilkan di footer sidebar.
+  const appVersion = useAppVersion();
   const MENU = business === 'all' ? MENU_ALL : business === 'fotokopi' ? MENU_PRINT : MENU_MINIMARKET;
 
   // Absensi hari ini untuk tombol cepat di sidebar (kasir & admin).
@@ -250,6 +253,11 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
             </p>
           </div>
         ) : null}
+
+        {/* Versi aplikasi ditampilkan kecil di footer sidebar (hanya saat sidebar penuh). */}
+        {!collapsed && (
+          <p className="px-2 mt-1 text-xs text-slate-500">v{appVersion.version}</p>
+        )}
 
         {canSwitch && (
           <>

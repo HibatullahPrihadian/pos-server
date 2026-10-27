@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "check": "node --check server.js",
+    "version": "node -e \"console.log(JSON.stringify(require('./utils/version')))\"",
     "test": "echo \"No automated tests\" && exit 0"
   },
   "keywords": [],

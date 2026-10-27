@@ -5,6 +5,10 @@ module.exports = {
     es2021: true,
     node: true,
   },
+  // Global build-time yang di-inject Vite lewat `define` (lihat vite.config.js).
+  globals: {
+    __APP_VERSION__: 'readonly',
+  },
   parserOptions: {
     ecmaVersion: 'latest',
     sourceType: 'module',

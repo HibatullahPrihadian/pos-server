@@ -7,6 +7,7 @@ const pool = require('./db');
 const { errorHandler, notFoundHandler } = require('./middleware/error');
 const { verifyJwt, resolveBusiness } = require('./middleware/auth');
 const { ensureDir, uploadRoot } = require('./utils/upload');
+const appVersion = require('./utils/version');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -35,6 +36,12 @@ app.get('/api/health', async (_req, res) => {
   } catch (err) {
     res.status(503).json({ status: 'degraded', db: 'error', error: err.message });
   }
+});
+
+// Endpoint versi aplikasi bersifat publik (tanpa JWT) agar halaman login dan
+// PWA bisa menampilkan versi yang sedang berjalan tanpa harus login dulu.
+app.get('/api/version', (_req, res) => {
+  res.json(appVersion);
 });
 
 // Login satu-satunya endpoint publik; seluruh /api lainnya wajib JWT.

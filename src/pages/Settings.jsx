@@ -9,11 +9,14 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Spinner from '../components/ui/Spinner';
+import useAppVersion from '../hooks/useAppVersion';
 
 const Settings = () => {
   const toast = useToastContext();
   const { settings, setSettings, reload } = useSettings();
   const { business } = useBusiness();
+  // Informasi versi aplikasi (diambil dari endpoint publik /api/version).
+  const appVersion = useAppVersion();
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -152,6 +155,28 @@ const Settings = () => {
               </span>
             </label>
             <p className="text-xs text-slate-400">Gambar ini ditampilkan di layar kasir saat pembayaran QRIS.</p>
+          </div>
+        </Card>
+
+        {/* Info versi aplikasi untuk keperluan support dan pelacakan build. */}
+        <Card title="Tentang Aplikasi">
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between">
+              <span className="text-slate-400">Versi aplikasi</span>
+              <span className="text-white">v{appVersion.version}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Commit build</span>
+              <span className="text-white font-mono">{appVersion.commit ? appVersion.commit.slice(0, 7) : '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Waktu build</span>
+              <span className="text-white">{appVersion.builtAt ? new Date(appVersion.builtAt).toLocaleString('id-ID') : '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-slate-400">Aplikasi</span>
+              <span className="text-white">POS Minimarket</span>
+            </div>
           </div>
         </Card>
       </div>

@@ -1,8 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+// Baca file VERSION di root (sumber kebenaran versi aplikasi) saat config dimuat.
+import { readFileSync } from 'node:fs'
+
+// Versi aplikasi dari file VERSION (tanpa prefix "v"), mis. "1.0.0".
+const APP_VERSION = readFileSync(new URL('./VERSION', import.meta.url), 'utf8').trim()
 
 export default defineConfig({
+  // Injeksi global build-time: __APP_VERSION__ diganti literal versi saat build.
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [
     react(),
     // Manifest + service worker di-generate otomatis (Workbox). Aplikasi tanpa
@@ -21,6 +30,9 @@ export default defineConfig({
         display: 'standalone',
         background_color: '#121212',
         theme_color: '#0a84ff',
+        // Isi manifest mengikuti VERSION agar versi terpasang bisa dicek.
+        version: APP_VERSION,
+        short_version: APP_VERSION,
         icons: [
           { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },

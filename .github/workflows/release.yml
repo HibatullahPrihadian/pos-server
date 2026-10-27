@@ -1,0 +1,41 @@
+name: Release
+
+# Trigger: hanya saat tag versi (v*) di-push ke repository.
+on:
+  push:
+    tags: ['v*']
+
+# Izin minimal: hanya menulis Release (tidak build/push image Docker).
+permissions:
+  contents: write
+
+# Satu release per ref; antrean tidak saling membatalkan.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout tag + riwayat commit penuh (fetch-depth 0).
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Ambil bagian CHANGELOG.md untuk versi tag ini sebagai catatan rilis.
+      # Gagal (versi tidak ada) tidak boleh menghentikan workflow.
+      - name: Ambil bagian CHANGELOG untuk tag ini
+        run: node .github/scripts/changelog-section.js "$GITHUB_REF_NAME" > release-notes.md || true
+
+      # Buat GitHub Release: pakai catatan dari CHANGELOG, atau generate-notes
+      # dari GitHub bila catatan kosong/tidak tersedia.
+      - name: Buat GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -s release-notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          fi

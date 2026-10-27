@@ -70,6 +70,9 @@ pos-server/
 ├── postcss.config.js
 ├── index.html
 ├── README.md
+├── VERSION               # sumber kebenaran versi aplikasi
+├── CHANGELOG.md          # riwayat versi (Keep a Changelog)
+├── .github/workflows/    # CI: buat GitHub Release otomatis saat tag di-push
 ├── backend/
 │   ├── Dockerfile
 │   ├── package.json
@@ -268,6 +271,67 @@ npm run dev
 ```
 
 Buka http://localhost:3000.
+
+---
+
+## 5a. Release & Versi
+
+Aplikasi memakai **Semantic Versioning** dengan sistem release otomatis.
+Sumber kebenaran versi adalah **file `VERSION` di root repo** — satu-satunya
+tempat versi ditulis; nilai `version` di `package.json` (root & `backend/`)
+selalu disinkronkan ke file tersebut.
+
+### Perintah
+
+| Perintah | Fungsi |
+|---|---|
+| `npm run release` | Bump versi otomatis dari conventional commit → perbarui `VERSION` + `package.json` + `CHANGELOG.md` → commit `chore(release): vX.Y.Z` → tag `vX.Y.Z` → push commit & tag |
+| `npm run release:dry` | Simulasi (dry-run): tampilkan versi baru & daftar commit, tanpa mengubah file, commit, tag, atau push |
+
+Flag penting:
+
+- `--bump patch|minor|major` — paksa tingkat kenaikan versi.
+- `--dry-run` — simulasi (setara `npm run release:dry`).
+- `--no-push` — jangan push commit & tag.
+- `--notes "..."` — catatan rilis tambahan untuk entri `CHANGELOG.md`.
+
+### Konvensi commit & aturan naik versi
+
+```
+feat|fix|perf|refactor|chore(scope): deskripsi
+```
+
+| Tipe commit | Naik versi | Contoh |
+|---|---|---|
+| `feat` | minor (1.0.0 → 1.1.0) | `feat(pos): tambah shortcut F7` |
+| `fix`, `perf` | patch (1.0.0 → 1.0.1) | `fix(report): perbaiki filter tanggal` |
+| `!` / `BREAKING CHANGE:` | major (1.0.0 → 2.0.0) | `feat(api)!: hapus endpoint lama` |
+
+### Alur rilis
+
+```
+Fitur di branch → merge ke main → npm run release → tag di-push
+      → GitHub Actions (.github/workflows/release.yml) → GitHub Release otomatis
+```
+
+Release GitHub dibuat oleh **GitHub Actions** saat tag `v*` di-push, memakai
+catatan rilis dari bagian `CHANGELOG.md` versi tersebut.
+
+### Prasyarat
+
+- Branch `main` harus bisa di-push langsung (tag ikut ter-push dari script).
+- `gh auth login` **tidak diperlukan** untuk alur normal — GitHub Release dibuat
+  oleh Actions. `gh` lokal hanya dipakai sebagai *fallback manual* bila workflow
+  gagal: `gh release create vX.Y.Z --generate-notes`.
+
+### Versi di dalam aplikasi
+
+Versi yang sama tampil di:
+
+- **Settings** → bagian "Tentang Aplikasi".
+- **Sidebar** (label versi kecil di footer).
+- **Manifest PWA** (`version`/`short_version`).
+- Endpoint backend **`GET /api/version`** (tanpa autentikasi).
 
 ---
 
