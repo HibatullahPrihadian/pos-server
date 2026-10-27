@@ -24,6 +24,13 @@ project ini memakai [Semantic Versioning](https://semver.org/lang/id/).
 - **Release GitHub** dibuat otomatis oleh GitHub Actions saat tag `v*` di-push;
   catatan rilis diambil dari bagian CHANGELOG versi tersebut.
 
+## [1.2.0] - 2026-10-27
+
+### Ditambahkan
+- feat(print): cetak struk ESC/POS via wrapper Windows dan Android (8ae3b35)
+
+[Bandingkan v1.1.0...v1.2.0](https://github.com/HibatullahPrihadian/pos-server/compare/v1.1.0...v1.2.0)
+
 ## [1.1.0] - 2026-10-27
 
 ### Catatan

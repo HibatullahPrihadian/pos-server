@@ -1,7 +1,7 @@
 {
   "name": "pos-minimarket-desktop",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Wrapper Electron untuk cetak struk ke printer serial/Bluetooth di Windows",
   "main": "main.cjs",
   "scripts": {
