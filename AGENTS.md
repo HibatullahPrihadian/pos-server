@@ -109,6 +109,22 @@ Frontend = React + Vite (ESM, di `src/`). Backend = Express **CommonJS**
   gagal dan user memintanya.
 - Jangan `npm install` package baru tanpa alasan kuat; gunakan dependensi yang
   sudah ada.
+- **Docker pada sesi non-GUI**: shell agent berjalan di sesi launchd
+  `Background`, sehingga login keychain macOS tidak bisa diakses
+  (`SecKeychainCopySettings: User interaction is not allowed`). Akibatnya
+  `docker pull`/`docker compose build` gagal dengan
+  `keychain cannot be accessed ...` karena `credsStore: "desktop"` memanggil
+  helper berbasis keychain. Unlock keychain dari terminal user **tidak**
+  menyelesaikannya (beda sesi). Gunakan wrapper yang sudah disiapkan:
+  ```bash
+  export DOCKER_CONFIG="$HOME/.docker/nokeychain" PATH="$HOME/.docker/nokeychain:$PATH"
+  ```
+  Wrapper memakai helper kredensial tanpa keychain, sehingga pull image publik
+  berjalan anonim. Konfigurasi `~/.docker/config.json` milik user **jangan**
+  diubah (login Docker user bisa rusak); `docker-compose` (plugin, bukan
+  `docker compose`) dipakai bila `docker compose` tidak dikenali.
+- `npm audit` pada build container melaporkan 2 vulnerability high di backend dan
+  8 di frontend (dev dependency) — belum ditangani, tidak menghalangi build.
 
 ## Gaya Kode
 

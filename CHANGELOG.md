@@ -24,6 +24,13 @@ project ini memakai [Semantic Versioning](https://semver.org/lang/id/).
 - **Release GitHub** dibuat otomatis oleh GitHub Actions saat tag `v*` di-push;
   catatan rilis diambil dari bagian CHANGELOG versi tersebut.
 
+## [1.0.1] - 2026-10-27
+
+### Catatan
+- Catatan environment Docker untuk sesi agent non-GUI: pull image memakai wrapper kredensial tanpa keychain (`DOCKER_CONFIG=$HOME/.docker/nokeychain`), konfigurasi `~/.docker/config.json` milik user tidak diubah.
+
+[Bandingkan v1.0.0...v1.0.1](https://github.com/HibatullahPrihadian/pos-server/compare/v1.0.0...v1.0.1)
+
 ## [1.0.0] - 2026-10-27
 
 Rilis baseline: seluruh fitur yang ada sebelum sistem versioning.
