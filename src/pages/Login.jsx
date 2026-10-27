@@ -2,12 +2,16 @@ import { useState } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { Store, LogIn } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import useAppVersion from '../hooks/useAppVersion';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 
 const Login = () => {
   const { user, login, loading } = useAuth();
   const navigate = useNavigate();
+  // Versi aplikasi ditampilkan di layar login agar pengguna bisa langsung
+  // menyebutkan versinya saat melapor masalah ke teknisi.
+  const appVersion = useAppVersion();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(null);
@@ -89,11 +93,14 @@ const Login = () => {
             </div>
           )}
 
-          <Button type="submit" className="w-full" disabled={submitting} size="lg">
-            <LogIn size={18} />
-            {submitting ? 'Memproses...' : 'Masuk'}
-          </Button>
+        <Button type="submit" className="w-full" disabled={submitting} size="lg">
+          <LogIn size={18} />
+          {submitting ? 'Memproses...' : 'Masuk'}
+        </Button>
         </form>
+
+        {/* Nomor versi di bawah form agar mudah dilihat tanpa perlu login. */}
+        <p className="text-center text-xs text-slate-500 mt-6">v{appVersion.version}</p>
       </div>
     </div>
   );

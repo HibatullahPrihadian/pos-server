@@ -24,6 +24,13 @@ project ini memakai [Semantic Versioning](https://semver.org/lang/id/).
 - **Release GitHub** dibuat otomatis oleh GitHub Actions saat tag `v*` di-push;
   catatan rilis diambil dari bagian CHANGELOG versi tersebut.
 
+## [1.1.0] - 2026-10-27
+
+### Catatan
+- Tampilkan nomor versi aplikasi di layar login (belum ada versi yang terlihat sebelum login) dan perbaiki cache versi agar tidak lagi menampilkan versi lama setelah deploy baru.
+
+[Bandingkan v1.0.1...v1.1.0](https://github.com/HibatullahPrihadian/pos-server/compare/v1.0.1...v1.1.0)
+
 ## [1.0.1] - 2026-10-27
 
 ### Catatan

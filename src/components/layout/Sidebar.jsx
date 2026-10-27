@@ -256,7 +256,7 @@ const Sidebar = ({ mobileOpen = false, onMobileClose }) => {
 
         {/* Versi aplikasi ditampilkan kecil di footer sidebar (hanya saat sidebar penuh). */}
         {!collapsed && (
-          <p className="px-2 mt-1 text-xs text-slate-500">v{appVersion.version}</p>
+          <p className="px-2 mt-1 text-xs text-slate-400">v{appVersion.version}</p>
         )}
 
         {canSwitch && (

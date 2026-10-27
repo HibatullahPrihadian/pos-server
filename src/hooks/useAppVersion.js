@@ -18,6 +18,15 @@ const normalize = (raw) => ({
   builtAt: raw.builtAt ?? null,
 });
 
+// Cache versi hanya valid bila versinya sama dengan versi build yang sedang
+// berjalan. Bila aplikasi baru di-deploy, cache lama (versi sebelumnya) harus
+// dibuang agar layar tidak menampilkan versi basi sampai request selesai.
+const isCacheFresh = (cached) => {
+  if (!cached || typeof cached !== 'object' || Array.isArray(cached)) return false;
+  if (!cached.version) return false;
+  return cached.version === FALLBACK.version;
+};
+
 // useAppVersion mengembalikan { version, commit, builtAt }.
 // Sumber utama: endpoint publik GET /api/version (commit/builtAt bisa null).
 // Nilai build (dari VERSION) dipakai sebagai cadangan bila endpoint gagal.
@@ -32,8 +41,11 @@ const useAppVersion = () => {
       const raw = sessionStorage.getItem(CACHE_KEY);
       if (raw) {
         const cached = JSON.parse(raw);
-        if (cached && typeof cached === 'object' && !Array.isArray(cached)) {
+        if (isCacheFresh(cached)) {
           setInfo(normalize(cached));
+        } else {
+          // Cache dari versi sebelumnya: buang agar tidak menampilkan versi lama.
+          sessionStorage.removeItem(CACHE_KEY);
         }
       }
     } catch {
