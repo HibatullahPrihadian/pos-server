@@ -30,16 +30,20 @@ const VERSION_FILES = [
   'CHANGELOG.md',
   'package.json',
   'backend/package.json',
+  'desktop/package.json',
   'package-lock.json',
   'backend/package-lock.json',
+  'desktop/package-lock.json',
 ];
 
 // File JSON yang field "version"-nya disinkronkan ke versi rilis.
 const VERSION_JSON_FILES = [
   'package.json',
   'backend/package.json',
+  'desktop/package.json',
   'package-lock.json',
   'backend/package-lock.json',
+  'desktop/package-lock.json',
 ];
 
 // Path yang tidak boleh ikut di-stage pada mode default (dicek dengan "mengandung").

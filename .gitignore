@@ -9,3 +9,5 @@ backend/uploads/*
 certs/
 # Sertifikat CA mkcert untuk dipasang di HP (jangan commit).
 rootCA.pem
+# Proyek Android dibuat lokal dengan `npm run android:add`; sumber plugin tetap dilacak.
+/android/

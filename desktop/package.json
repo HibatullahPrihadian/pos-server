@@ -1,0 +1,30 @@
+{
+  "name": "pos-minimarket-desktop",
+  "private": true,
+  "version": "1.1.0",
+  "description": "Wrapper Electron untuk cetak struk ke printer serial/Bluetooth di Windows",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "id.kenari.pos",
+    "productName": "POS Minimarket",
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

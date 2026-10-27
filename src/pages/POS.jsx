@@ -23,7 +23,7 @@ import useDebounce from '../hooks/useDebounce';
 import useHotkeys from '../hooks/useHotkeys';
 import { formatCurrency, parseMoney, parseQty } from '../utils/formatters';
 import { resolveBarcode as lookupBarcode } from '../utils/barcode';
-import { printReceipt } from '../utils/printReceipt';
+import { printSaleReceipt } from '../utils/printer';
 
 const PAY_METHODS = [
   { key: 'cash', label: 'Tunai', icon: Banknote },
@@ -871,8 +871,8 @@ const POS = () => {
 
   // Shortcut lokal modal struk: P cetak, Enter tutup (Esc ditangani cascade).
   useHotkeys({
-    P: () => printReceipt(),
-    'Alt+P': () => printReceipt(),
+  P: () => printSaleReceipt(receiptSale, settings, receiptChange).catch((err) => toast.error(err.message)),
+  'Alt+P': () => printSaleReceipt(receiptSale, settings, receiptChange).catch((err) => toast.error(err.message)),
     Enter: () => setReceiptSale(null),
   }, { enabled: Boolean(receiptSale) });
 
@@ -1497,7 +1497,7 @@ const POS = () => {
         footer={
           <div className="flex justify-end gap-2">
             <Button variant="neutral" onClick={() => setReceiptSale(null)}>Tutup (Enter)</Button>
-            <Button onClick={printReceipt}><Printer size={16} /> Cetak Struk (Alt+P)</Button>
+            <Button onClick={() => printSaleReceipt(receiptSale, settings, receiptChange).catch((err) => toast.error(err.message))}><Printer size={16} /> Cetak Struk (Alt+P)</Button>
           </div>
         }
       >

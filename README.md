@@ -480,6 +480,16 @@ Hanya area `#receipt-print-area` yang tercetak.
 - Matikan header/footer browser saat mencetak.
 - Integrasi ESC/POS langsung dan cash drawer tidak termasuk cakupan MVP.
 
+Cetak ESC/POS Bluetooth tersedia sebagai adapter untuk wrapper perangkat:
+
+- Windows: jalankan desktop wrapper Electron (`npm run desktop`) setelah mengisi `POS_SERVER_URL` dengan origin hosting POS. Printer harus paired dan muncul sebagai COM port serial; baud rate awal 9600 dan harus diverifikasi terhadap printer.
+- Android: jalankan `npm run android:add` sekali untuk membuat proyek native dan mendaftarkan plugin Bluetooth, lalu `npm run build` dan `npm run android:sync`. Folder `android/` dibangkitkan lokal dan tidak disimpan di Git. Build APK memerlukan Android Studio/SDK dan perlu diverifikasi pada perangkat.
+- URL default wrapper hanya placeholder `https://pos.example.com`; ubah `POS_SERVER_URL` di Windows dan `capacitor.config.json` di Android sebelum distribusi.
+- Bridge native hanya menyediakan daftar perangkat, pilih perangkat, cetak/test print. Pilihan printer disimpan lokal: `printer.json` di userData Electron dan `SharedPreferences` Android; tidak disimpan di akun/server.
+- Nota pesanan fotokopi memakai jalur cetak langsung yang sama; bila wrapper tidak tersedia, tombol cetak tetap membuka dialog browser.
+- RPP02N belum diuji pada perangkat nyata. Pastikan unit mendukung SPP, port COM Windows, baud rate, code page ESC/POS untuk teks Indonesia, dan pairing Android sebelum mengaktifkan mode ini.
+- Browser/PWA biasa tetap memakai dialog `window.print()`. Kegagalan print langsung tidak membatalkan transaksi; cetak ulang dapat dilakukan dari menu Transaksi.
+
 **Label barcode paket** (menu Paket → tab **Barcode**): pilih paket lalu cetak label.
 Gambar barcode dirender server-side sebagai SVG (`GET /api/bundles/:id/barcode.svg` atau
 `POST /api/bundles/barcodes/render` untuk massal) dan dicetak lewat `window.print()` dengan

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Save, Upload, QrCode } from 'lucide-react';
+import { Save, Upload, QrCode, Printer } from 'lucide-react';
 import { api } from '../api/client';
 import { useToastContext } from '../context/ToastContext';
 import { useSettings } from '../context/SettingsContext';
@@ -10,6 +10,7 @@ import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Spinner from '../components/ui/Spinner';
 import useAppVersion from '../hooks/useAppVersion';
+import { clearSelectedPrinter, getSelectedPrinter, hasDirectPrinter, listPrinters, selectPrinter, testPrinter } from '../utils/printer';
 
 const Settings = () => {
   const toast = useToastContext();
@@ -20,6 +21,49 @@ const Settings = () => {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [printerList, setPrinterList] = useState([]);
+  const [selectedPrinter, setSelectedPrinter] = useState(null);
+  const directPrinterAvailable = hasDirectPrinter();
+
+  useEffect(() => {
+    if (!directPrinterAvailable) return;
+    getSelectedPrinter().then(setSelectedPrinter).catch(() => setSelectedPrinter(null));
+  }, [directPrinterAvailable]);
+
+  const refreshPrinters = async () => {
+    try {
+      const printers = await listPrinters();
+      setPrinterList(printers);
+      toast.success(`${printers.length} perangkat ditemukan`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const choosePrinter = async (id) => {
+    try {
+      if (!id) {
+        await clearSelectedPrinter();
+        setSelectedPrinter(null);
+        return;
+      }
+      await selectPrinter(id);
+      const printer = printerList.find((item) => item.id === id) || null;
+      setSelectedPrinter(printer);
+      toast.success(`Printer ${printer?.name || id} dipilih`);
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
+  const runTestPrint = async () => {
+    try {
+      await testPrinter();
+      toast.success('Perintah tes cetak dikirim');
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
 
   useEffect(() => {
     if (settings) {
@@ -113,6 +157,27 @@ const Settings = () => {
             <Input label="Prefix Invoice" value={form.invoice_prefix} onChange={(e) => setForm({ ...form, invoice_prefix: e.target.value.toUpperCase() })} />
             <Input as="textarea" label="Footer Struk" value={form.receipt_footer} onChange={(e) => setForm({ ...form, receipt_footer: e.target.value })} />
           </div>
+        </Card>
+
+        <Card title="Printer Thermal Bluetooth">
+          {directPrinterAvailable ? (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-400">Pilih printer yang sudah dipasangkan dengan perangkat kasir. Pilihan berlaku selama aplikasi berjalan.</p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="neutral" onClick={refreshPrinters}><Printer size={16} /> Cari perangkat</Button>
+                {selectedPrinter && <Button onClick={runTestPrint}>Tes cetak</Button>}
+              </div>
+              {printerList.length > 0 && (
+                <Input as="select" label="Perangkat printer" value={selectedPrinter?.id || ''} onChange={(event) => choosePrinter(event.target.value)}>
+                  <option value="">Pilih printer</option>
+                  {printerList.map((printer) => <option key={printer.id} value={printer.id}>{printer.name}</option>)}
+                </Input>
+              )}
+              <p className="text-xs text-slate-400">Jika koneksi atau tes cetak gagal, gunakan browser print sebagai fallback. Cetak langsung belum diuji pada semua varian RPP02N.</p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">Cetak Bluetooth langsung tersedia melalui aplikasi POS Windows/Android. Browser/PWA tetap menggunakan dialog cetak standar.</p>
+          )}
         </Card>
 
         {/* Poin/stok hanya berlaku untuk minimarket; mode lain memakai setelan usaha. */}

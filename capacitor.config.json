@@ -1,0 +1,9 @@
+{
+  "appId": "id.kenari.pos",
+  "appName": "POS Minimarket",
+  "webDir": "dist",
+  "server": {
+    "url": "https://pos.example.com",
+    "cleartext": false
+  }
+}
